@@ -1,0 +1,33 @@
+School of Athens, blah blah blah, painted in whatever year. ChatGPT has written a paragraph for three different philosophers. Press one of the keys:
+
+A - Pythagoras
+B - Plato
+C - Diogenes
+D - Return
+
+Pythagoras:
+
+Pythagoras sits on the left side, surrounded by attentive students as he writes in a book and demonstrates ideas with a tablet. His depiction emphasizes mathematics, proportion, and harmony, reflecting his association with number theory and music. The cluster around him shows the transmission of knowledge, highlighting him as a cornerstone of ancient philosophy and science.
+
+A - Pythagoras
+B - Plato
+C - Diogenes
+D - Return
+
+Plato:
+
+At the very center of the fresco, Plato stands pointing upward, holding his book Timaeus. Raphael shows him as an elder, long-bearded figure, symbolizing the realm of ideal forms and abstract thought. His upward gesture contrasts with Aristotle beside him, embodying the Platonic emphasis on higher truths beyond the material world.
+
+A - Pythagoras
+B - Plato
+C - Diogenes
+D - Return
+
+Diogenes:
+
+Diogenes reclines casually on the steps in the right half of the painting, apart from the surrounding figures, emphasizing his Cynic rejection of convention. His relaxed, almost careless posture reflects his philosophy of independence from material and social concerns. Raphael’s placement of him sprawled in the midst of the formal gathering makes him a visual disruption, true to his role as an outsider among philosophers.
+
+A - Pythagoras
+B - Plato
+C - Diogenes
+D - Return
