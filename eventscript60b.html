@@ -1,0 +1,2142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>EventScript60</title>
+  <link rel="icon" href="icon.png" sizes="180x180">
+  <link rel="apple-touch-icon" href="icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="EventScript60">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no">
+  <!-- setting the base href removes the special case of a blank string fetch req resolving to the html file -->
+  <base href="./">
+  <style>
+    @font-face{font-family:DOSEGA;src:url('DOSEGA.ttf') format('truetype');}
+    html{overscroll-behavior:none}
+    body{--r:75;background:black;/**/margin:0}
+    #canv{background-color:black;outline:none;pointer-events:none;position:fixed;touch-action:none}
+    #codeWriter{background-color:#000000;border:none;border-radius:0;color:#AAAAAA;font-size:16px;font-family:Menlo,Monaco,monospace;outline:none;pointer-events:none;position:absolute;resize:none;scrollbar-color:#5a5a5a transparent;touch-action:none;white-space:pre}
+    #consInp{background-color:#000000;border:none;/**/border-radius:0;/**/bottom:8px;color:#AAAAAA;font-family:DOSEGA,monospace;font-size:16px;outline:none;pointer-events:none;position:absolute;right:8px;top:calc(100% - 24px);touch-action:none}
+    #consSelect{bottom:0;position:absolute;right:0;}
+    #consoleDiv{background-color:#000000;bottom:32px;color:#AAAAAA;display:flex;flex-direction:column;font-size:16px;justify-content:flex-end;overflow-x:hidden;overflow-y:auto;overscroll-behavior:none;padding:6px;pointer-events:none;position:absolute;right:8px;scrollbar-color:#4d63b0 transparent;scroll-behavior:smooth;touch-action:none;word-wrap:break-word}
+    .consoleLn{cursor:default;font-family:DOSEGA,monospace;text-align:center;}
+    #curtain{position:absolute;background:#00AAAA}
+    #cwSelect{position:absolute}
+    #workspace{background:#0000AA;bottom:0;pointer-events:none;position:fixed;right:0;touch-action:none}
+    @keyframes colorFade{0%{background-color:#a88f05}100%{background-color:#6b7dc6}}
+    @media(orientation:landscape){
+      #canv{height:100dvh;width:calc(var(--r) * 1dvw)}
+      #codeWriter{bottom:calc(35% + 8px);left:16px;right:8px;top:8px}
+      #consInp{left:16px}
+      #consoleDiv{left:16px;top:calc(65% + 8px)}
+      #consSelect{left:8px;top:65%}
+      #curtain{height:100dvh;width:8px}
+      #cwSelect{bottom:35%;left:8px;right:0;top:0}
+      #workspace{left:calc(var(--r) * 1dvw);top:0}
+    }
+    @media(orientation:portrait){
+      #canv{height:calc(var(--r) * 1dvh);width:100dvw}
+      #codeWriter{bottom:8px;left:8px;right:calc(35% + 8px);top:16px}
+      #consInp{left:calc(65% + 8px)}
+      #consoleDiv{left:calc(65% + 8px);top:16px}
+      #consSelect{bottom:0;left:65%;top:8px}
+      #curtain{height:8px;width:100dvw}
+      #cwSelect{bottom:0;left:0;right:35%;top:8px}
+      #workspace{left:0;top:calc(var(--r) * 1dvh)}
+    }
+  </style>
+</head>
+<body onload="onLoad()" tabindex="-1">
+<canvas id="canv" tabindex="-1"></canvas>
+<div id="workspace">
+  <div id="cwSelect"></div><div id="consSelect"></div><div id="curtain"></div>
+  <textarea id="codeWriter" spellcheck="false" autocapitalize="none" autocorrect="off"></textarea>
+  <div id="consoleDiv"></div>
+  <input id="consInp" spellcheck="false" autocapitalize="none" autocorrect="off" value=">">
+</div>
+<script>
+
+/* 
+  5-bit alphabet:
+    0:' '(@),1:\n,2:+,3:-,4:*,5:/,6:%,7:&,8:|,9:^,10:=,11:<,12:>,
+    13:!,14:.,15:?,16:(,17:),18:g,19:x,20:e,21:f,22–31:0–9
+
+  vm design:
+    3 prims (aka regs/iterators)
+      instrs it
+      pfStk it
+      drwStk it
+    2 bytes for metadata
+      +0: instrs end byte (units of 256 bytes)
+      +1: eoCnt
+    7 buffer sections
+      instrs (bytes, starting at [2], variable len)
+      pfStk (64b flts, ctx a 4-struct, 16(ie.maxDpt)*8*4=512)
+      props (64b flts, eoCnt*64*8 bytes)
+      64b glbs (64b flts, 64*8=512 bytes)
+      8glbs (8ints, 256 bytes)
+      drwStk (8ints, 512 bytes)
+    total bytes: 2+instrs+512+eoCnt*512+512+256+512
+
+  props:
+    0:scale,1:left,2:top,3:width,4:height,5:opacity,6:rotate,
+    7:red,8:green,9:blue,10:alph,11:source,12:time,13:page,14:stch,
+    15:endch,16:fontsize,17:bgRed,18:bgGreen,19:bgBlue,20:bgAlpha,21-63:custom
+
+  prop defaults:
+    scale:1,left:-0.5,top:-0.5,width:1,height:1,opacity:1,rotate:0,
+    red:0.5,green:0.5,blue:0.5,alph:1,source:-1,time:0,page:0,stch:0,
+    endch:100,fontsize:0.05,bgRed:0,bgGreen:0,bgBlue:0,bgAlpha:0
+
+  glb64s:
+    +0:dt,+1:scrT,+2:date,+3:cursX,+4:cursY,+5:pitch,
+    +6:roll,+7:yaw,+8:ar,+9:nw,+10:nh,11-63:custom
+
+  glb8s:
+    0-25:keyPr(a-z),26-51:keyDwn(a-z),52-77:keyUp(a-z)
+    78-82:mousePr(0-5),83-87:mouseDwn(0-5),88-92:mouseUp(0-5),93-191:custom
+
+  instrs:
+    0:ADD,1:SUB,2:MUL,3:DIV,4:MOD,5:AND,6:OR,7:POW,8:EQ,9:LT,10:GT,11:LE,
+    12:GE,13:NOT,14:NE,15:NEG,16:COS,17:SIN,18:TAN,19:ABS,20:SQRT,21:RANDINT,
+    22:RANDFLT,23:WNUM(+1/2/3/4:32IntNum)(23 also used for openBr during shunt),
+    24:DNUM(+1/2/3/4:32IntNum),25:RPROP(+1:eo,+2:tar),26:RSRC(+1:eo,+2:tar),
+    27:RG64(+1:tar),28:RG8(+1:tar),29:WPROP(+1:eo,+2:tar),30:WSRC(+1:eo,+2:tar),
+    31:WG64(+1:tar),32:WG8(+1:tar),33:DRW(+1:eo||drop),34:CHK(+1/2:tar),
+    35:JMP(+1/2:tar),36:PGS(+1:eo,+2:cnt,+3/4:bigJmpTar,...16bJmpTars),
+    37:TL(+1:eo,+2:cnt,+3/4:bigJmpTar,...32IntDurs,...16bJmpTars),
+    38: NOP
+*/
+
+let buffInUse,tMap,bScr,lnStChs,lnEnChs,lnDpts,lnPars,lnMCnts,lnMIdxs,lnJmps;
+let lnMap,bStk,buff,a8,a32,dfa,maxE,propDfts,pm,sh,selectionState;
+let ctx,pd,rw,rh,ru,cx,cy,rcx,rcy,pgT,animId,ox,oy,os,tchs,locFiles;
+let imgBckt,sndBckt,vidBckt,blankVm,glbVm,recursiveEoCnt,qMap,mainFlg;
+let glbVmGlbs64,glbVmGlbs8;
+
+// sets glbs above, runs once onload
+const setupGlbs=()=>{
+  // buffInUse is a block for potential risk of async a8 usage
+  // aka when calling a script as an eo-src ('script within a script')
+  buffInUse=false;
+  // tMap: chCode->token process at start of cpl
+  tMap=new Uint8Array(128); 
+  // filling tMap
+  // first add a fallback of 19 aka x, arbitrary, as long as not space or /n
+  // since lnBrk and spaces are used in a pre-calc to get the nested structure
+  // fallback stops inline paths in double quotes being counted as lnBrk or space
+  tMap.fill(19);
+  const sym=' \n+-*/%&|^=<>!.?()gxef0123456789';
+  for(let i=0;i<sym.length;i++)tMap[sym.charCodeAt(i)]=i;
+  bScr=new Uint8Array(559104); // byteScript, holds ch toks, max 256+16+1*2048
+  lnStChs=new Uint16Array(2048); // ln start chars
+  lnEnChs=new Uint16Array(2048); // ln end chars (ie: /n or undefined)
+  lnDpts=new Uint8Array(2048); // ln dpts (space count + 1)
+  lnPars=new Uint16Array(2048); // ln parents (used for count-sort)
+  lnMCnts=new Uint8Array(2048); // lnMap counts (ie: num of chldrn)
+  lnMIdxs=new Uint16Array(2048); // lnMap idx (ie: to lookup mapped chldrn)
+  lnJmps=new Uint16Array(2048); // ln jmps, used to hold jmp tars in cpl
+  lnMap=new Uint16Array(2048); // maps lns within each ln, ie count-sort output
+  bStk=new Uint16Array(16); // buildStk, hdls nested ctx when mapping lns
+  buff=new ArrayBuffer(1048576); // temp write loc during cpl
+  a8=new Uint8Array(buff); // main instrs, incls 16b manually packed
+  a32=new Float32Array(buff); // inline 32flts for numbers and tl durs
+  dfa=new Uint8Array(32*49); // cpl dfa (32toks*49states)
+  setupDFA(); // fills dfa
+  maxE=0; // tracks highest eoNum referenced during cpl
+  propDfts=[1,-0.5,-0.5,1,1,1,0,0.5,0.5,0.5,1,-1,0,0,0,100,0.05,0.5,0.5,0.5,0];
+  // instr precMap for shunting yard
+  pm=[
+    5, // +
+    5, // -
+    6, // *
+    6, // /
+    3, // &
+    2, // |
+    7, // ^
+    4, // ==
+    4, // <
+    4, // >
+    4, // <=
+    4, // >=
+    8, // !
+    4, // !=
+    8, // u-
+    1, // ...func0
+    1, // ...func1
+    1, // ...func2
+    1, // ...func3
+    1, // ...func4
+    1, // ...func5
+    1, // ...func6
+    1, // ...func7
+    0  // openBr
+  ]
+  // shunting yard stack, max 256ch ln so max case = 256 opening brackets
+  sh=new Uint8Array(256);
+  // page-related glbs
+  selectionState=0; // aka scarlet highlight of codeWriter,cons,canv,or none
+  // decl canv ctx, skip alpha as no pg underneath to blend with
+  ctx=canv.getContext("2d",{alpha:false});
+  pd=window.devicePixelRatio; // pixel density, used by display glbs
+  // refresh func sets display glbs (eg on window resize) used by the scripts
+  // ie: rw,rh,ru,rcx,rcy,cx,cy (renderWidth,renderHeight,renderUnitDimension
+  // renderCenterX,renderCenterY,centerX,centerY)
+  // calling once to set initial values
+  refresh();
+  // page time, used as ref to set scr time each frame
+  // ie it saves previous time in seconds, allow calculation of dt
+  pgT=performance.now()*0.001;
+  // animId used for toggling requestAnimationFrame draw on/ooff
+  animId=null;
+  ox=0; // offset-X in px
+  oy=0; // offset-Y in px
+  os=1; // offset scale (ie 100%)
+  tchs=new Map(); // holds values of multi-finger touches, id key
+  // local files uploaded have their pseudo-URL put into locFiles
+  // on cpl, they take priority over ordinary url fetch requests
+  locFiles=Object.create(null);
+  // buckets for reusing html elements
+  // should drastically cut down lag on rapid recompiles
+  imgBckt=[];
+  sndBckt=[];
+  vidBckt=[];
+  // blankVm used for scripts within scripts before they've loaded
+  // similar with a blank string being used before the txt is fetched
+  blankVm=cpl('');
+  glbVm=blankVm; // so recycleEles works on initial glbCpl()
+  // qMap record src line (quote locations, for friendly-vers export)
+  qMap=[];
+  // mainflg ensures qMap only filled during glbCpl
+  mainFlg=false;
+  // cpl glb from location (#) url parameter (even if blank)
+  codeWriter.value=prepImp(decodeURIComponent(location.hash.slice(1)));
+  glbCpl(); // glbCpl also sets  glbVmGlbs64 and glbVmGlbs8;
+  // which are basically easy-access views of the glbVm
+  // for keydown, mousemove etc to edit globals inside glbVm
+};
+
+// manually fills big DFA used by cpl
+const setupDFA=()=>{
+  /* 
+  dfa runs on each ln through each ch-byte. each ln should have one total purpose
+  (such as write a prop, timeline, etc) so the purpose aspect is parsed
+  as a state derived explicitly from the line, rather than being just
+  a regular postfix op
+
+  when the DFA is ran, most states generate a call in a case switch
+
+  the general types derived from a line are:
+    1. nothing (aka garbage, nothing written, finish dfa)
+    2. write to a local property (eg 'x10=') (goes to expression-parse)
+    3. write to an external property (eg 'e10x20=') (goes to expression-parse)
+    4. write to a global (eg 'g5=') (goes to expression-parse)
+    5. check (ie ?) (goes to expression-parse)
+    6. eo call (eg e10) (finish dfa, parse each child ln)
+    7. srcs (ie *) (finish dfa, parse each child-ln as src)
+    8. pages (ie +) (finish dfa, parse each child-ln as a page)
+    9. timeline (ie -) (finish dfa, parse each child-ln as timeline interval)
+
+  write/check state leads into the arbitrary-expression-evaluation 
+  state-lineage of the DFA, which in their case switches pushes postfix elements:
+    1. operators (+,-,brackets etc)
+    2. local property reads (eg 'x10')
+    2. external property reads (eg 'e10x20')
+    3. inline numbers (eg '5')
+
+  expression parses end by pushing the write or check instruction
+  that was flagged in the earlier case, plus calls other checks
+  to sanitize output such as looking for unbalanced brackets
+
+  functions are used to bulk-fill similar states. 'identical' states are kept
+  separate when they will have different logic in their case switch
+  */
+
+  // fills operator/postfix-start states, aka into operands
+  const opAndPFStartFill=s=>{
+    dfltTrunc(s); // default to trunc
+    digsFill(s,37) // digs->intDig(37)
+    dfa[(s<<5)|14]=39; // -> dot->dotAfterOpOrStart(39)
+    dfa[(s<<5)|16]=22; // openBr->openBr(22)
+    dfa[(s<<5)|3]=25; // hyphen->neg(25)
+    dfa[(s<<5)|13]=26; // excl->not(26)
+    dfa[(s<<5)|21]=35; // f->func-f(35)
+    dfa[(s<<5)|19]=41; // x->locRead-x(41)
+    dfa[(s<<5)|18]=43; // g->glbRead-g(43)
+    dfa[(s<<5)|20]=45; // e->extRead-e(45)
+  };
+  // fills arg ie operand states ie into ops
+  const argFill=s=>{
+    // add/sub/mul/div/mod/and/or pack into one state (23)
+    for(let t=2;t<=8;t++)dfa[(s<<5)|t]=23;
+    dfa[(s<<5)|9]=24; // exponent->pow(24)
+    dfa[(s<<5)|10]=33; // eq->eq(33)
+    dfa[(s<<5)|11]=30; // lessThan->lessThan(30)
+    dfa[(s<<5)|12]=30; // greaterThan (same state as lessThan)
+    dfa[(s<<5)|13]=31; // excl->notEqExcl(31)
+    dfa[(s<<5)|17]=34; // closeBr->closeBr(34)
+  };
+  // generic fill for all digs going somewhere (default=itself)
+  const digsFill=(s,tar=s)=>{for(let t=22;t<32;t++)dfa[(s<<5)|t]=tar};
+  // generic fill for all toks going into trunc brk(21) aka as a state default
+  const dfltTrunc=(s)=>{for(let t=0;t<32;t++)dfa[(s<<5)|t]=21;}
+  // s0: 'end' state, only goes to itself(0) (case: none)
+    // useful since 0 is default jmp val, so saves effort of filling
+  // s1: starting state (case: none)
+    dfa[(1<<5)|2]=2; // plus->pgs?(2)
+    dfa[(1<<5)|3]=3; // hyphen->tl?(3)
+    dfa[(1<<5)|4]=4; // star->srcs?(4)
+    dfa[(1<<5)|15]=5; // qm->chk(5)
+    dfa[(1<<5)|19]=6; // x->locWr?(6)
+    dfa[(1<<5)|20]=7; // e->eoOrExtWr?(7)
+    dfa[(1<<5)|18]=8; // g->glbWrite-g?(8)
+  // s2: pgs? (case: none)
+    dfa[(2<<5)|1]=9; // lnBrk->pgs(9)
+  // s3: tl? (case: none)
+    dfa[(3<<5)|1]=10; // lnBrk->tl(10)
+  // s4: srcs? (case: none)
+    dfa[(4<<5)|1]=11; // lnBrk->srcs(11)
+  // s5: chk (case: flg chk)
+    opAndPFStartFill(5); // into postfix
+  // s6: locWr? (case: none)
+    digsFill(6,12); // digs->locWrite-dig?(12)
+  // s7: eoOrExtWr? (case: none)
+    digsFill(7,13); // digs->eoOrExtWrEDig?(13)
+  // s8: glbWrG? (case: none)
+    digsFill(8,14); // digs->glbWrDig?(14)
+  // s9: pgs (case: parse child lns as pages)
+  // s10: tl (case: parse child lns as tl)
+  // s11: srcs (case: parse child lns as srcs)
+  // s12: locWrDig? (case: increase xTar)
+    digsFill(12); // digs->itself(12)
+    dfa[(12<<5)|10]=15; // eq->locWrite-eq(15)
+  // s13: eoOrExtWrEDig? (case: increase eTar)
+    digsFill(13); // digs->itself(13)
+    dfa[(13<<5)|1]=16; // lnBrk->eo(16)
+    dfa[(13<<5)|19]=17; // x->extWrite-x?(17)
+  // s14: glbWrDig? (case: increase xTar)
+    digsFill(14); // digs->itself(14)
+    dfa[(14<<5)|10]=18; // eq->glbWrite-eq(18)
+  // s15: locWrEq (case: flg locWr)
+    opAndPFStartFill(15); // into postfix
+  // s16: eo (case: parse child lns as eo)
+  // s17: extWrX? (case: none)
+    digsFill(17,19); // digs->extWrite-x-dig?(19)
+  // s18: glbWrEq (case: flg glbWr)
+    opAndPFStartFill(18); // into postfix
+  // s19: extWrXDig? (case: edit xTar)
+    digsFill(19); // digs->itself(19)
+    dfa[(19<<5)|10]=20; // eq->extWrite-x-eq(20)
+  // s20: extWrXEq (case: flg extWr)
+    opAndPFStartFill(20); // into postfix
+  // s21: truncBrk (case: trunc pf)
+    // hanging pf operators break out here instead of at 0
+    // pops any (((,!,u- off stack, and pops final hanging operator
+    // the case also checks for eFlag first (ie that at least one arg pushed)
+    // meaning, it's fine for pf starts like 'x0=f' to break here too
+  // s22: openBr (case: openBr++, stk-push)
+    opAndPFStartFill(22);
+  // s23: add/sub/mul/div/mod/and/or (case: shunt/stk-push)
+    opAndPFStartFill(23);
+  // s24: pow (case: shunt/stk-push)
+    opAndPFStartFill(24);
+  // s25: neg (case: shunt/stk-push)
+    opAndPFStartFill(25);
+  // s26: not (case: shunt/stk-push)
+    opAndPFStartFill(26);
+  // s27: eqeq (case: shunt/stk-push)
+    opAndPFStartFill(27);
+  // s28: lessThanOrEq (case: edit stk tos)
+    opAndPFStartFill(28);
+  // s29: greaterThanOrEq (case: edit stk tos)
+    opAndPFStartFill(29);
+  // s30: lessThan/greaterThan (case: shunt)
+    opAndPFStartFill(30);
+  // s31: notEqExcl (case: none)
+    dfa[(31<<5)|10]=32; // eq->notEqEq(32)
+  // s32: notEqEq (case: shunt/stk-push)
+    opAndPFStartFill(32);
+  // s33: eq (case: none)
+    dfa[(33<<5)|10]=27; // eq->eqeq(27)
+  // s34: closeBr (case: shunt)
+    argFill(34); // treat like an operand
+  // s35: func-f (case: none)
+    dfltTrunc(35); // dflt to truncBrk
+    digsFill(35,36); // digs->func-dig(36)
+  // s36: funcDig (case: increase p0, lookahead)
+    digsFill(36); // digs->self(36)
+    dfa[(36<<5)|16]=22; // openBr->openBr(22)
+  // s37: intDig (case: increase p0, lookahead)
+    argFill(37);
+    digsFill(37); // digs->self(37)
+    dfa[(37<<5)|14]=38; // dot->dot(38)
+  // s38: dotAfterDig (case: lookahead)
+    digsFill(38,40); // digs->fractDiv(40)
+  // s39: dotAfterOpOrStart (case: lookahead)
+    // same as above but with default to truncBrk
+    dfltTrunc(39); // dflt to truncBrk
+    digsFill(39,40); // digs->fractDiv(40)
+  // s40: fractDig (case: increase p1, lookahead)
+    argFill(40);
+    digsFill(40); // digs->self(40)
+  // s41: locRead-x (case: none)
+    dfltTrunc(41); // dflt to truncBrk
+    digsFill(41,42); // digs->locRead-x-dig(42)
+  // s42: locRead-x-dig (case: increase p0, lookahead)
+    argFill(42); // into operators
+    digsFill(42); // digs->self(42)
+  // s43: glbRead-g (case: none)
+    dfltTrunc(43); // dflt to truncBrk
+    digsFill(43,44); // digs->glbRead-dig(44)
+  // s44: glbRead-dig (case: increase p0, lookahead)
+    argFill(44); // into operators
+    digsFill(44); // digs->self(44)
+  // s45: extRead-e (case: none)
+    dfltTrunc(45); // dflt to truncBrk
+    digsFill(45,46); // digs->extRead-e-dig(46)
+  // s46: extRead-e-dig (case: increase p0)
+    dfltTrunc(46); // dflt to truncBrk
+    digsFill(46); // digs->self(46)
+    dfa[(46<<5)|19]=47; // x->extRead-x(47)
+  // s47: extR-x (case: none)
+    dfltTrunc(47); // dflt to truncBrk
+    digsFill(47,48); // digs->extRead-x-dig(48)
+  // s48: extRead-x-dig (case: increase p1, lookahead)
+    argFill(48);  // into operators
+    digsFill(48); // digs->self(48)
+};
+
+// compiler, str->vm
+const cpl=(str)=>{
+  buffInUse=true; // flg prevents async a8 access/interference
+  // map chs to 5bit tok alphabet (bScr)
+  for(let i=0;i<str.length;i++){
+    bScr[i]=tMap[str.charCodeAt(i)];
+  }
+  // dfa on each line expects a lnBrk end, so add final lnBrk
+  bScr[str.length]=1;
+  // fill lnStChs,lnEnChs,lnMCnts,lnMIdxs,lnMap
+  // first two lets us run dfa on ln at a time
+  // latter three hold the nested (count-sorted) ln structure
+  mapLns(str.length+1,str);
+  // z: instr it, starts at 2, as first two used bytes for metadata
+  let z=2;
+  // maxE reset to 0, tracks highest eo referenced during cpl
+  maxE=0;
+  // output vm created relatively early
+  // since src elements get pushed to it
+  // null ([0]) gets replaced at end with buffer of vm
+  const vm=[null];
+  // push instr to draw root eo (ie eo 0)
+  a8[z++]=33;
+  a8[z++]=0;
+  z+=prsLns(0,z,0,vm,str); // prs all lns in root
+  const eoCnt=maxE+1; // +1 of  max eo referenced gives total cnt
+  // push a ctx drop from root ie DRW255
+  a8[z++]=33;
+  a8[z++]=255;
+  a8.fill(38,z,z+256); // pad end with 38 (NOP) instr
+  z=(z+255)&~255; // z to nearest 256 line
+  a8[0]=z>>8; // instr len byte set (unit multiples of 256)
+  a8[1]=eoCnt; // eoCnt byte
+  // from vm map: instrs+512+eoCnt*512+512+256+512
+  const vmBuff=new ArrayBuffer(z+1792+eoCnt*512);
+  // create views of new buffer
+  const b8=new Uint8Array(vmBuff);
+  const b64=new Float64Array(vmBuff);
+  // set null/first element to the new buffer
+  vm[0]=vmBuff;
+  // transfer the instrs
+  b8.set(a8.subarray(0,z),0)
+  // fill default prop (64b) vals
+  const propOff=(z+512)>>3;
+  for(let i=0;i<eoCnt;i++){
+    b64.set(propDfts,propOff+(i<<6));
+  }
+  buffInUse=false;
+  // edit glb val recursiveEoCnt
+  // used as a limiter for nested scripts in prsSrcs
+  recursiveEoCnt+=eoCnt;
+  return vm;
+};
+
+// compiles the global scr
+const glbCpl=()=>{
+  // reset cap on nested eos (checked at prsSrcs)
+  recursiveEoCnt=0;
+  // reset qMap (maps quote locations during script friendly-code export)
+  qMap.length=0;
+  // mainFlg tells us whether to map quote locations at all
+  mainFlg=true;
+  // save html elements from old script into buckets
+  recycleEles(glbVm);
+  glbVm=cpl(codeWriter.value);
+  const meta=new Uint8Array(glbVm[0],0,2);
+  const instrEnd=meta[0]<<8;
+  const eoCnt=meta[1];
+  let z=instrEnd; // iterator for declaring views
+  z+=64*8;
+  z+=eoCnt*64*8;
+  glbVmGlbs64=new Float64Array(glbVm[0],z,64);
+  z+=64*8;
+  glbVmGlbs8=new Uint8Array(glbVm[0],z,192);
+  mainFlg=false;
+  location.hash=prepExp(codeWriter.value);
+};
+
+// reads through bScr while < len, fills lnStChs,lnEnChs,lnMCnts,lnMIdxs,lnMap
+const mapLns=(len)=>{
+  // start by manually considering the root eventObj, aka e0
+  // we put this theoretical line in the map and treat it as 0 dpt
+  // all visible lines are either in the root (dpt 1) or each other (dpt>1)
+  let z=0; // lns iterator
+  lnStChs[z]=0; // root stCh, meaningless (no string to read)
+  lnEnChs[z]=0; // root enCh, meaningless (no string to read)
+  lnDpts[z]=0; // root dpt 0
+  z++;
+  let dpt=1,chCnt=0;
+  for(let i=0;i<len;i++){
+    while(bScr[i]===0)dpt++,i++; // count spaces
+    while(bScr[i]!==1&&i<len)chCnt++,i++; // count chars
+    // at this point we're at lnBrk(1) or scr end, so push ln vals
+    lnStChs[z]=i-chCnt; // stCh
+    lnEnChs[z]=i; // enCh
+    lnDpts[z]=dpt; // dpt
+    chCnt=0; // reset ch acc
+    dpt=1; // reset dpt (aka space acc)
+    z++; // adv ln iterator
+  }
+  // bStk (build-stack) with iterator y is used to capture the nested structure
+  let y=0; bStk[y++]=0; // add root to stk
+  // +1 indent means ln is 'inside' ln above (aka tos), else stk popped until same dpt
+  // end goal is to fill lnMap, a map of each ln inside each ln
+  // conceptually, very similar to a counting-sort algorithm
+  // first part, loop sets parent and counts total children of each line
+  for(let i=1;i<z;i++){
+    const lnDpt=lnDpts[i];
+    // examples: 0-indent ln has a dpt of 1, so while 1<1 stk popped (impossible)
+    // but one level lower, y=2, exp dpt 2, else stk popped to 1, and ln into root
+    // and so on. might take a diagram to prove convincingly
+    while(lnDpt<y)y--;
+    const par=bStk[y-1]; // parent ln = current tos
+    lnPars[i]=par; // ln pars mapped temporarily, for the sort
+    lnMCnts[i]=0; // set to 0, gets incremented by nested lns
+    lnMCnts[par]++; // incr chldrn cnt of parent ln, essential for cnt-sort
+    bStk[y++]=i; // current ln becomes new tos
+    // currently capping the children per line to 256 and dpt at 16
+    // as with other caps, not necessarilly any hard-set reasons
+    if(lnMCnts[par]>=255){cOut('limit reached, scr trunc');break;}
+    if(y>=15){cOut('limit reached, scr trunc');break;}
+  } 
+  // part two of count-sort fills lnMap,lnMIdxs,lnMCnt
+  // each chldren of each ln put in the map contigously starting at its lnMIdx
+  // start by manually filling root, with idx at 0
+  // count reset for each one, used as an iterator for each chld added to map
+  // so eventually fills back up to the original cnt
+  let acc=lnMCnts[0];
+  lnMIdxs[0]=0;
+  lnMCnts[0]=0;
+  for(let i=1;i<z;i++){
+    const par=lnPars[i];
+    const cnt=lnMCnts[i];
+    lnMIdxs[i]=acc;
+    acc+=cnt;
+    lnMCnts[i]=0;
+    lnMap[lnMIdxs[par]+lnMCnts[par]]=i;
+    lnMCnts[par]++;
+  }
+};
+
+const prsLns=(ln,z,eo,vm,str)=>{
+  const intlZ=z;
+  const mi=lnMIdxs[ln];
+  const mc=lnMCnts[ln];
+  // using lnMap, loop through the ln's chldrn
+  outerLp:for(let i=0;i<mc;i++){
+    const cLn=lnMap[mi+i];
+    const startCh=lnStChs[cLn];
+    const endChar=lnEnChs[cLn];
+    // dfa moves through each ch of the line, and state goes into a case switch
+    // first declaring a bunch of variables edited by the different states
+    let state=1; // aka (it combine cur state with tok->next state)
+    let pfTy=-1; // gets set if we need a instr added after pf end
+    let xTar=0; // holds tar for xN=,eNxM=,gN=
+    let eTar=0; // holds tar for eN,eNxM=
+    let y=0; // shunting yard stack (sh) iterator
+    let p0=0; // primitive 1, for inline reads, which get pushed to instrs
+    let p1=0; // primitive 2, as with p0
+    let fracDenom=1; // for recording decimal component of inline num
+    let openBr=0; // cnts open brackets on sh for an automatic balance at end
+    let eFlg=true; // emptyFlg, any fs arg sets to false (if true, final wr is interrupted)
+    // dfa uses the final lnBrk, so lp purposely runs on endChar
+    for(let j=startCh;j<=endChar;j++){
+      const tok=bScr[j];
+      state=dfa[(state<<5)|tok];
+      switch(state){
+        case 0: continue; // 'end'
+        case 1: continue; // 'start'
+        case 2: continue; // 'pgs?'
+        case 3: continue; // 'tl?'
+        case 4: continue; // 'srcs?'
+        case 5: // 'chk'
+          pfTy=0; // flg for check-write
+          break;
+        case 6: continue; // 'locWr?'
+        case 7: continue; // 'eoOrExtWr?'
+        case 8: continue; // 'glbWrG?'
+        case 9: // 'pgs'
+          z+=prsPgs(cLn,z,eo,vm,str); // parse cLn as pages
+          continue outerLp; // skip to next cLn
+        case 10: // 'tl'
+          z+=prsTl(cLn,z,eo,vm,str); // parse cLn as timeline
+          continue outerLp; // skip to next cLn
+        case 11: // 'srcs'
+          prsSrcs(cLn,vm,str); // parse cLn as srcs
+          continue outerLp; // skip to next cLn
+        case 12: // 'locWrDig?'
+          xTar=xTar*10+(tok-22); // increase xTar
+          break;
+        case 13: // 'eoOrExtWrEDig?'
+          eTar=eTar*10+(tok-22); // increase eTar
+          break; 
+        case 14: // 'glbWrDig?'
+          xTar=xTar*10+(tok-22); // increase xTar
+          break;
+        case 15: // 'locWrEq'
+          pfTy=1; // flg for loc-write
+          break;
+        case 16: // 'eo'
+          eTar=eTar>254?254:eTar; // 255 eventObject cap, so cap the ref
+          if(eTar>maxE)maxE=eTar; // maxE used to calc size of final vm
+          a8[z++]=33; // DRW instr
+          a8[z++]=eTar; // tar eo
+          z+=prsLns(cLn,z,eTar,vm,str); // parse cLn as eo
+          // push eo drop instr ie DRW255
+          a8[z++]=33;
+          a8[z++]=255;
+          continue outerLp; // skip to next cLn
+        case 17: continue; // 'extWrX?'
+        case 18: // 'glbWrEq'
+          pfTy=2; // flg for glb-write
+          break;
+        case 19: // 'extWrXDig?'
+          xTar=xTar*10+(tok-22); // increase xTar
+          break;
+        case 20: // 'extWrXEq'
+          pfTy=3; // flg for ext-write
+          break;
+        case 21: // 'truncBrk'
+          // lnBrks with hanging math operators in dfa end here
+          // truncSh assumes at least one hanging operator
+          // (and checks for open brackets, funcs, and unary operators)
+          // hence is only run if at least one argument (ie eFlg=false)
+          if(!eFlg){
+            y+=truncSh(y);
+          }
+          break;
+        case 22: // 'openBr'
+          sh[y++]=23; // push openBracket instr (23) onto shunt stk 
+          openBr++; // prim used to automatically balance brackets at end
+          break;
+        case 23: // 'add/sub/mul/div/mod/and/or'
+          // above tok are contigious tokens and in precMap
+          // so merged states by using tok-2 for the instruction ref
+          // ('+' is token 2, and ADD is vm instr 0, etc)
+          while(pm[sh[y-1]]>=pm[tok-2])a8[z++]=sh[--y];
+          sh[y++]=tok-2;
+          break;
+        case 24: // 'pow'
+          // power is vm instr 7
+          while(pm[sh[y-1]]>pm[7])a8[z++]=sh[--y];
+          sh[y++]=7;
+          break;
+        case 25: // 'neg'
+          // neg is vm instr 15
+          while(pm[sh[y-1]]>pm[15])a8[z++]=sh[--y];
+          sh[y++]=15;
+          break;
+        case 26: // 'not'
+          // not is vm instr 13
+          while(pm[sh[y-1]]>pm[13])a8[z++]=sh[--y];
+          sh[y++]=13;
+          break;
+        case 27: // 'eqeq' (ie '==')
+          // eq is vm instr 8
+          while(pm[sh[y-1]]>pm[8])a8[z++]=sh[--y];
+          sh[y++]=8;
+          break;
+        case 28: // 'lessThanOrEq'
+          // ie if '<=' current shunt tos is '<'
+          // so just change the instr
+          sh[y-1]=11;
+          break;
+        case 29: // 'greaterThanOrEq'
+          // ie if '>=' current shunt tos is '>'
+          // so just change the instr
+          sh[y-1]=12;
+          break;
+        case 30: // 'lessThan/greaterThan'
+          // next to each other in toks and instr so just push tok-2
+          while(pm[sh[y-1]]>=pm[tok-2])a8[z++]=sh[--y];
+          sh[y++]=tok-2;
+          break;
+        case 31: continue; // 'notEqExcl'
+        case 32: // 'notEqEq'
+          // notEq is vm instr 14
+          while(pm[sh[y-1]]>pm[14])a8[z++]=sh[--y];
+          sh[y++]=14;
+          break;
+        case 33: continue; // 'eq'
+        case 34: // 'closeBr'
+          // if there's a closing bracket without any opening
+          // will just stop reading the expr (forward into trunc-brk)
+          // otherwise, decrease prim, and classic shunt
+          if(openBr===0){
+            state=21;
+          }else{
+            openBr--;
+            while(sh[y-1]!==23)a8[z++]=sh[--y]; // pop until '('
+            y--; // remove final '('
+            // pop func too if it is underneath
+            if(sh[y-1]>=16&&sh[y-1]<=22){
+              a8[z++]=sh[--y];
+            }
+          }
+          break;
+        case 35: continue; // 'func-f'
+        case 36: // 'func-dig'
+          p0=p0*10+(tok-22); // increase prim0
+          // lookahead. if not another func-dig, push func
+          if(bScr[j+1]<22){
+            p0=p0>6?6:p0; // cap val at valid function (f0 to f6)
+            sh[y++]=p0+16; // push func instr (16 to 22)
+            p0=0; // reset primitive for next arg
+          }
+          break;
+        case 37: // 'intDig'
+          p0=p0*10+(tok-22); // increase prim0
+          // lookahead, if not '.' or another dig, push operand
+          if(bScr[j+1]!==14&&bScr[j+1]<22){
+            z+=pushWNum(p0,z);
+            p0=0; // reset prim for next arg
+            eFlg=false; // an arg pushed, so expr not empty
+          }
+          break;
+        case 38: // 'dotAfterDig'
+          // lookahead, if not a dig, push operand
+          if(bScr[j+1]<22){
+            z+=pushWNum(p0,z);
+            p0=0; // reset prim for next arg
+          }
+          break;
+        case 39: // 'dotAfterOpOrStart'
+          // lookahead, if not a dig then into trunc-brk
+          if(bScr[j+1]<22){
+            state=21;
+          }
+          break;
+        case 40: // 'fractDig'
+          fracDenom*=10;
+          p1+=(tok-22)/fracDenom;
+          // lookahead, if not another dig, push operand
+          if(bScr[j+1]<22){
+            z+=pushDNum(p0,p1,z);
+            p0=0; // reset prim0 for next arg
+            p1=0; // likewise for prim1
+            fracDenom=1; // likewise for fracDenom
+            eFlg=false; // an arg pushed, so expr not empty
+          }
+          break;
+        case 41: continue; // 'locRead-x'
+        case 42: // 'locRead-x-dig'
+          p0=p0*10+(tok-22); // increase prim0
+          // lookahead, if not another dig, push operand
+          if(bScr[j+1]<22){
+            z+=pushX(eo,p0,z,false);
+            p0=0; // reset prim0 for next arg
+            eFlg=false; // arg pushed, so flip empty flg
+          }
+          break;
+        case 43: continue; // 'glbRead-g'
+        case 44: // 'glbRead-dig'
+          p0=p0*10+(tok-22); // increase prim0
+          // lookahead, if not another dig, push operand
+          if(bScr[j+1]<22){
+            z+=pushG(eo,p0,z,false);
+            p0=0; // reset prim0 for next arg
+            eFlg=false; // arg pushed, so flip empty flg
+          }
+          break;
+        case 45: continue; // 'extRead-e'
+        case 46: // 'extRead-e-dig'
+          p0=p0*10+(tok-22); // increase prim0
+          break;
+        case 47: continue; // 'extRead-x'
+        case 48: // 'extRead-x-dig'
+          p1=p1*10+(tok-22); // increase prim1
+          // lookahead, if not another dig, push operand
+          if(bScr[j+1]<22){
+            z+=pushX(p0,p1,z,false);
+            p0=0; // reset prim0 for next arg
+            p1=0; // likewise for prim1
+            eFlg=false; // an arg pushed, so expr not empty
+          }
+          break;
+      }
+    }
+    // all that is left it to push the write or check instr for some cases
+    // skip if eFlg, as not needed if there's no proceeding expression
+    if(eFlg)continue;
+    // next, if pf has increased openBr without returning to 0, balance
+    while((openBr)>0){ 
+      // same code as closeBr
+      openBr--;
+      while(sh[y-1]!==23){
+        // pop stk until bracket(23)
+        a8[z++]=sh[--y];
+      }
+      y--; // pop bracket itself
+      if(sh[y-1]>=16&&sh[y-1]<=22){
+        // pop func too if it is underneath
+        a8[z++]=sh[--y];
+      } 
+    }
+    // empty shunt stk
+    while(y>0){
+      a8[z++]=sh[--y];
+    }
+    // add final instruction based on pfTy
+    switch(pfTy){
+      case 0: z+=pushChk(cLn,z,eo,vm,str);break; // chk
+      case 1: z+=pushX(eo,xTar,z,true);break; // locWr
+      case 2: z+=pushG(xTar,z,true);break; // gWr
+      case 3: z+=pushX(eTar,xTar,z,true);break; // extWr
+    }
+  }
+  return z-intlZ;
+};
+
+// truncates hanging operators from shunt stk
+const truncSh=(y)=>{
+  // intent is to handle things like 'x0+5*-(!(f8(-'
+  const intlY=y;
+  while(true){
+    const tos=sh[y-1]; // top of stk
+    const nos=sh[y-2]; // next on stk
+    // if tos = openBr(ie 23), pop and openBr--
+    // if nos a func, pop that too
+    // else if a neg(13) or not(15, pop)
+    // else done
+    if(tos===23){
+      y--;
+      openBr--;
+      if(nos>15&&nos<=23){
+        y--;
+      }
+    }else if(tos===13||tos===15){
+      y--;
+    }else{
+      break;
+    }
+  }
+  // pop the final hanging operator
+  // (had we ended on an arg, dfa wouldn't have gone to trunc state)
+  y--;
+  return y-intlY;
+};
+
+const pushWNum=(num,z)=>{
+  const intlZ=z;
+  if(num>4294967295)num=4294967295;
+  a8[z++]=23; // wNum instr
+  a8[z++]=num/16777216; // wNum first byte
+  a8[z++]=num/65536; // wNum second byte
+  a8[z++]=num/256; // wNum third byte
+  a8[z++]=num%256; // wNum forth byte
+  return z-intlZ;
+};
+
+const pushDNum=(intNum,fractNum,z)=>{
+  const intlZ=z;
+  a8[z++]=24; // dNum instr
+  if(intNum>9999)intNum=9999;
+  if(fractNum>0.9999)fractNum=0.9999;
+  const fracInt=Math.floor(fractNum*10000); // scale fractional part
+  a8[z++]=intNum/256;   // int high byte
+  a8[z++]=intNum%256;   // int low byte
+  a8[z++]=fracInt/256;  // frac high byte
+  a8[z++]=fracInt%256;  // frac low byte
+  return z-intlZ;
+};
+
+const pushX=(eo,num,z,wr)=>{
+  // wr=write, if true, a write instr, else a read instr
+  const intlZ=z;
+  // tar cap at 320 total (64 eo properties + 256 RSRC/WSRC)
+  num=num>319?319:num;
+  eo=eo>254?254:eo;
+  if(eo>maxE)maxE=eo;
+  if(num<64){
+    // normal RPROP/WPROP
+    a8[z++]=wr?29:25;
+    a8[z++]=eo;
+    a8[z++]=num;
+  }else{
+    // RSRC/WSRC
+    a8[z++]=wr?30:26;
+    a8[z++]=eo; 
+    a8[z++]=num-64;
+  }
+  return z-intlZ;
+};
+
+const pushG=(eo,num,z,wr)=>{
+  // wr=write, if true, a write instr, else a read instr
+  const intlZ=z;
+  num=num>255?255:num; // 256 total glbs (64 64bs and 192 8bs)
+  eo=eo>254?254:eo;
+  if(eo>maxE)maxE=eo;
+  if(num<64){
+    // 64b glb
+    a8[z++]=wr?31:27;
+    a8[z++]=num;
+  }else{
+    // 8b glb
+    a8[z++]=wr?32:28;
+    a8[z++]=num-64;
+  }
+  return z-intlZ;
+};
+
+const pushChk=(ln,z,eo,vm,str)=>{
+  const intlZ=z;
+  a8[z++]=34; // chk instr (cont if stk true, jmp if false)
+  const jmp1=z++; // space for first byte of jmp
+  const jmp2=z++; // space for second byte of jmp
+  z+=prsLns(ln,z,eo,vm,str);
+  a8[jmp1]=z/256; // fill first byte of jmp
+  a8[jmp2]=z%256; // fill second byte of jmp
+  return z-intlZ;
+};
+
+const prsPgs=(ln,z,eo,vm,str)=>{
+  const intlZ=z;
+  a8[z++]=36; // pgs instr
+  a8[z++]=eo;
+  const mi=lnMIdxs[ln];
+  const mc=lnMCnts[ln];
+  a8[z++]=mc;
+  const bigJmp1=z++; // bigJmp first byte
+  const bigJmp2=z++; // bigJmp second byte
+  const jmpTarsStart=z;
+  z+=mc*2; // make space for jmpTars (two bytes each)
+  // using lnMap, loop through the ln's chldrn
+  for(let i=0;i<mc;i++){
+    const cLn=lnMap[mi+i];
+    a8[jmpTarsStart+i*2]=z/256; // jmp first byte
+    a8[jmpTarsStart+(i*2)+1]=z%256; // jmp second byte
+    z+=prsLns(cLn,z,eo,vm,str);
+    a8[z++]=35; // uncond jmp at end of page
+    lnJmps[cLn]=z++; // save jmpTar for later fill
+    z++; // second byte of end jmp
+  }
+  // fill final pgs bigJmp
+  a8[bigJmp1]=z/256; // first byte
+  a8[bigJmp2]=z%256; // second byte
+  // finally, fill each uncond jmp at end of each pg, with same bigJmp tar
+  for(let i=0;i<mc;i++){
+    const cLn=lnMap[mi+i];
+    const endJmp=lnJmps[cLn];
+    a8[endJmp]=z/256; // first byte
+    a8[endJmp+1]=z%256; // second byte
+  }
+  return z-intlZ;
+};
+
+const prsTl=(ln,z,eo,vm,str)=>{
+  const intlZ=z;
+  a8[z++]=37; // tl instr
+  a8[z++]=eo;
+  const mi=lnMIdxs[ln];
+  const mc=lnMCnts[ln];
+  a8[z++]=mc;
+  const bigJmp1=z++;
+  const bigJmp2=z++;
+  const dursStart=z;
+  z+=mc*4; // 4 bytes per dur
+  const tarsStart=z;
+  z+=mc*2; // 2 bytes per jmp tar
+  for(let i=0;i<mc;i++){
+    const cLn=lnMap[mi+i];
+    const dur=lnToDur(cLn); // reads line dur in int/ms/capped
+    a8[dursStart+i*4]=dur/16777216; // dur byte 1
+    a8[dursStart+i*4+1]=dur/65536; // dur byte 2
+    a8[dursStart+i*4+2]=dur/256; // dur byte 3
+    a8[dursStart+i*4+3]=dur%256; // dur byte 4
+    a8[tarsStart+i*2]=z/256;
+    a8[tarsStart+i*2+1]=z%256;
+    z+=prsLns(cLn,z,eo,vm,str);
+    a8[z++]=35; // uncond jmp at end of interval
+    lnJmps[cLn]=z++; // save jmpTar for later fill
+    z++; // second byte of end jmp
+  }
+  a8[bigJmp1]=z/256;
+  a8[bigJmp2]=z%256;
+  // finally, fill each uncond jmp at end of each interval, with same bigJmp tar
+  for(let i=0;i<mc;i++){
+    const cLn=lnMap[mi+i];
+    const endJmp=lnJmps[cLn];
+    a8[endJmp]=z/256;
+    a8[endJmp+1]=z%256;
+  }
+  return z-intlZ;
+};
+
+const lnToDur=(ln)=>{
+  let dur=0;
+  let intFlg=true;
+  let fracDenom=1;
+  const stCh=lnStChs[ln];
+  const enCh=lnEnChs[ln];
+  for(let i=stCh;i<enCh;i++){
+    const t=bScr[i];
+    if(t>21){
+      if(intFlg){
+        dur=dur*10+(t-22);
+      }else{
+        fracDenom*=10;
+        dur+=(t-22)/fracDenom;
+      }
+    }else if(t===14&&intFlg){
+      intFlg=false;
+    }else{
+      break;
+    }
+  }
+  dur=Math.floor(dur*1000); // convert sec→ms, drop extra decimals
+  if(dur>0xFFFFFFFF)dur=0xFFFFFFFF; // cap to 32-bit int
+  return dur;
+};
+
+const prsSrcs=(ln,vm,str)=>{
+  const mi=lnMIdxs[ln];
+  const mc=lnMCnts[ln];
+  // using lnMap, lp through the ln's chldrn
+  for(let i=0;i<mc;i++){
+    const cLn=lnMap[mi+i];
+    const stCh=lnStChs[cLn];
+    let srcTy=-1;
+    if(bScr[stCh]>=22)srcTy=bScr[stCh]-22;
+    const cmi=lnMIdxs[cLn];
+    const cmc=lnMCnts[cLn];
+    for(let j=0;j<cmc;j++){
+      const gLn=lnMap[cmi+j];
+      if(mainFlg){
+        qMap.push(lnStChs[gLn],lnEnChs[gLn]);
+      }
+      const srcStr=str.substring(lnStChs[gLn],lnEnChs[gLn]);
+      switch(srcTy){
+        case 0:  // img, path
+          const img=imgBckt.length?imgBckt.pop():document.createElement('img');
+          img.src=locFiles[srcStr]?locFiles[srcStr]:srcStr;
+          vm.push(img);
+          break;
+        case 1: // txt, path
+          const txtIdx=vm.push('')-1;
+          fetch(locFiles[srcStr]?locFiles[srcStr]:srcStr)
+            .then(r=>r.text())
+            .then(t=>vm[txtIdx]=t)
+            .catch(()=>{}); // blank, but removes unhndled promise cons err
+          break;
+        case 2: // snd, path
+          const snd=sndBckt.length?sndBckt.pop():document.createElement('audio');
+          snd.loop=true;
+          snd.src='';
+          snd.currentTime=0;
+          snd.playbackRate=1;
+          snd.volume=1;
+          snd.src=locFiles[srcStr]?locFiles[srcStr]:srcStr;
+          snd.called=false;
+          vm.push(snd);
+          break;
+        case 3: // vid, path
+          const vid=vidBckt.length?vidBckt.pop():document.createElement('video');
+          vid.loop=true;
+          vid.src='';
+          vid.currentTime=0;
+          vid.playbackRate=1;
+          vid.volume=1;
+          vid.src=locFiles[srcStr]?locFiles[srcStr]:srcStr;
+          vid.called=false;
+          vm.push(vid);
+          break;
+        case 4: // scr, path
+          const scrIdx=vm.push(blankVm)-1;
+          fetch(locFiles[srcStr]?locFiles[srcStr]:srcStr)
+            .then(r=>r.text())
+            .then(t=>{
+              if(buffInUse){
+                cOut('error on cpl, buffer in use');
+              }else if(recursiveEoCnt>1000){
+                cOut('error on cpl, recursiveEoCnt>1000');
+              }else{
+                vm[scrIdx]=cpl(t);
+              }
+          });
+          break;
+        case 5: // inline txt
+          vm.push(srcStr);
+          break;
+      }
+    }
+  }
+};
+
+const recycleEles=(oldVm)=>{
+  for(let i=1;i<oldVm.length;i++){
+    if(oldVm[i] instanceof HTMLImageElement){
+      imgBckt.push(oldVm[i]);
+    }else if(oldVm[i] instanceof HTMLAudioElement){
+      oldVm[i].pause();
+      sndBckt.push(oldVm[i]);
+    }else if(oldVm[i] instanceof HTMLVideoElement){
+      oldVm[i].pause();
+      vidBckt.push(oldVm[i]);
+    }else if(Array.isArray(oldVm[i])){
+      recycleEles(oldVm[i]);
+    }
+  }
+};
+
+// runs vm, draws its output frame
+const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
+  // grab various variables for reading the vm
+  const buff=vm[0];
+  const meta=new Uint8Array(buff,0,2);
+  const instrEnd=meta[0]<<8;
+  const eoCnt=meta[1];
+  const v8=new Uint8Array(buff,0,instrEnd);
+  let z=instrEnd; // iterator for declaring views
+  const pf=new Float64Array(buff,z,64); z+=64*8;
+  const props=new Float64Array(buff,z,eoCnt*64); z+=eoCnt*64*8;
+  const glbs64=new Float64Array(buff,z,64); z+=64*8;
+  const glbs8=new Uint8Array(buff,z,192); z+=192;
+  const drwStk=new Uint8Array(buff,z,256);
+  // every eo loaded on a read gets pushed to drwStk and drawn at end
+  // every back-out of an eo pushes 255 (ctx drop instr) to drwStk
+  let y=0; // drwStk iterator
+  // main lp, i as instr iterator, j as pf iterator
+  lp:for(let i=2,j=0;i<instrEnd;i++){
+    switch(v8[i]){
+      case 0: pf[j-2]+=pf[--j]; break; // nos+tos
+      case 1: pf[j-2]-=pf[--j]; break; // nos-tos
+      case 2: pf[j-2]*=pf[--j]; break; // nos*tos
+      case 3: pf[j-2]/=pf[--j]; break; // nos/tos
+      case 4: pf[j-2]%=pf[--j]; break; // nos%tos
+      case 5: pf[j-2]=pf[j-2]&&pf[--j]; break; // nos&tos
+      case 6: pf[j-2]=pf[j-2]||pf[--j]; break; // nos|tos
+      case 7: pf[j-2]**=pf[--j]; break; // nos^tos
+      case 8: pf[j-2]=+(pf[j-2]==pf[--j]); break; // nos==tos
+      case 9: pf[j-2]=+(pf[j-2]<pf[--j]); break; // nos<tos
+      case 10: pf[j-2]=+(pf[j-2]>pf[--j]); break; // nos>tos
+      case 11: pf[j-2]=+(pf[j-2]<=pf[--j]); break; // nos<=tos
+      case 12: pf[j-2]=+(pf[j-2]>=pf[--j]); break; // nos>=tos
+      case 13: pf[j-1]=+!pf[--j]; break; // !tos
+      case 14: pf[j-2]=+(pf[j-2]!=pf[--j]); break; // nos!=tos
+      case 15: pf[j-1]=-pf[j-1]; break; // -tos
+      case 16: pf[j-1]=Math.cos(pf[j-1]); break; // cos(tos)
+      case 17: pf[j-1]=Math.sin(pf[j-1]); break; // sin(tos)
+      case 18: pf[j-1]=Math.tan(pf[j-1]); break; // tan(tos)
+      case 19: pf[j-1]=Math.abs(pf[j-1]); break; // abs(tos)
+      case 20: pf[j-1]=Math.sqrt(pf[j-1]); break; // sqrt(tos)
+      case 21: pf[j-1]=Math.floor(Math.random()*pf[j-1]); break; // randInt(tos)
+      case 22: pf[j-1]=Math.random()*pf[j-1]; break; // randFlt(tos)
+      case 23: // wNum
+        pf[j++]=v8[i+1]*16777216+v8[i+2]*65536+v8[i+3]*256+v8[i+4];
+        i+=4;
+        break;
+      case 24: // dNum
+        const intNum=v8[i+1]*256+v8[i+2];
+        const fracNum=(v8[i+3]*256+v8[i+4])/10000;
+        pf[j++]=intNum+fracNum;
+        i+=4;
+        break;
+      case 25: // r-Prop (eo:+1,idx:+2)
+        pf[j++]=props[v8[i+1]*64+v8[i+2]];
+        i+=2;
+        break;
+      case 26: // r-src (eo:+1,tar:+2)
+        const rSrcNum=props[v8[i+1]*64+11];
+        const rTar=v8[i+2];
+        pf[j++]=readSrcX(vm,rSrcNum,rTar);
+        i+=2;
+        break;
+      case 27: // r-Glb-64 (tar:+1)
+        pf[j++]=glbs64[v8[++i]];
+        break;
+      case 28: // r-Glb-8 (tar:+1)
+        pf[j++]=glbs8[v8[++i]];
+        break;
+      case 29: // wProp (eo:+1,idx:+2)
+        props[(v8[i+1]*64)+v8[i+2]]=pf[--j];
+        i+=2;
+        break;
+      case 30: // wSrc (eo:+1,tar:+2)
+        const wSrcNum=props[(v8[i+1]*64)+11];
+        const stkPop=pf[--j];
+        writeSrcX(vm,wSrcNum,v8[i+2],stkPop);
+        i+=2;
+        break;
+      case 31: glbs64[v8[++i]]=pf[--j]; break; // wr-64glb (idx:+1)
+      case 32: glbs8[v8[++i]]=pf[--j]; break; // wr-8glb (idx:+1)
+      case 33: drwStk[y++]=v8[++i]; break; // DRW (+1:eo||drop)
+      case 34: // CHK (+1/2:tar)
+        if(pf[--j])i+=2;
+        else i=(v8[i+1]*256+v8[i+2])-1;
+        break;
+      case 35: // JMP (+1/+2)
+        i=v8[i+1]*256+v8[i+2]-1;break;
+      case 36: // PGS (+1:eo,+2:cnt,+3/4:bigJmpTar,...16bJmpTars)
+        const pg=props[(v8[i+1]*64)+13];
+        const pgCnt=v8[i+2];
+        if(pg>0&&pg<pgCnt){
+          const tarIdx=i+5+(pg*2);
+          i=v8[tarIdx]*256+v8[tarIdx+1]-1;
+        }else{
+          i=v8[i+3]*256+v8[i+4]-1;
+        }
+        break;
+      case 37: // TL (+1:eo,+2:cnt,+3/4:bigJmpTar,...32IntDurs,...16bJmpTars)
+        const tlTime=v64[props+((v8[i+1])<<6)+12]*1000; // sec to ms
+        const tlCnt=v8[i+2];
+        const dursStart=i+5;
+        const jmpsStart=dursStart+tlCnt*4;
+        for(let k=0,acc=0;k<tlCnt;k++){
+          const b0=v8[dursStart+k*4];
+          const b1=v8[dursStart+k*4+1];
+          const b2=v8[dursStart+k*4+2];
+          const b3=v8[dursStart+k*4+3];
+          const dur=b0*16777216+b1*65536+b2*256+b3;
+          const start=acc;
+          const end=acc+dur;
+          acc+=dur;
+          if(tlTime>=start&&tlTime<end){
+            const tarIdx=jmpsStart+(k<<1);
+            i=v8[tarIdx]*256+v8[tarIdx+1]-1;
+            continue lp;
+          }
+        }
+        // if still here, no interval matched, so into bigJmp
+        i=v8[i+3]*256+v8[i+4]-1;
+        break;
+      case 38: continue; // NOP
+      default:
+        cOut('invalid vm instr, should not happen...');
+        cOut('plz fw exact code to Joe@eventscript.org');
+        return;
+    }
+  }
+  // going through drwStk from 0 to y to draw the calls in their nested context
+  // with 255 as the 'drop' instr
+  // pf reused as a ctx-Stk to carry uPx,cxPx,cyPx
+  // first inserting root ctx
+  let x=0; // ctx-Stk iterator
+  pf[x++]=vmUPx*vmOS; // rend uPx
+  pf[x++]=vmCXPx+vmOX; // rend cxPx
+  pf[x++]=vmCYPx+vmOY; // rend cyPx
+  ctx.save();
+  // next, lp through drwStk
+  for(i=0;i<y;i++){
+    const eo=drwStk[i];
+    // check for drop instr
+    if(eo===255){
+      x-=3;
+      ctx.restore();
+      continue;
+    }
+    // if still here, normal eo, so drawing
+    // first convert eo properties into pxs
+    const pUPx=pf[x-3];
+    const pCxPx=pf[x-2];
+    const pCyPx=pf[x-1];
+    const sc=props[eo*64+0];
+    const l=props[eo*64+1];
+    const t=props[eo*64+2];
+    const w=props[eo*64+3];
+    const h=props[eo*64+4];
+    const wPx=w*(pUPx/2)*sc;
+    const hPx=h*(pUPx/2)*sc;
+    const uPx=Math.min(wPx,hPx);
+    const lPx=pCxPx+l*(pUPx/2);
+    const tPx=pCyPx+t*(pUPx/2);
+    const cxPx=lPx+(wPx/2);
+    const cyPx=tPx+(hPx/2);
+    // push to ctxStk
+    pf[x++]=uPx;
+    pf[x++]=cxPx;
+    pf[x++]=cyPx;
+    ctx.save(); // save cur ctx, to drop down into later
+    // opacity
+    ctx.globalAlpha*=props[eo*64+5];
+    // rotation
+    const rot=props[eo*64+6];
+    if(rot!==0){
+      // if rot nonzero, converted into a standard matrix transform
+      const adjRot=rot*(2*Math.PI);
+      ctx.setTransform(
+        Math.cos(adjRot),Math.sin(adjRot),
+        -Math.sin(adjRot),Math.cos(adjRot),
+        cxPx-Math.cos(adjRot)*cxPx+Math.sin(adjRot)*cyPx,
+        cyPx-Math.sin(adjRot)*cxPx-Math.cos(adjRot)*cyPx
+      );
+    };
+    // clip its own dims, to limit what is drawn inside
+    ctx.beginPath();
+    ctx.rect(lPx,tPx,wPx,hPx);
+    ctx.clip();
+    // draw eo
+    // starting with background
+    setCtxClr(props[eo*64+17],props[eo*64+18],props[eo*64+19],props[eo*64+20]);
+    ctx.fillRect(lPx,tPx,wPx,hPx);
+    // get srcNum to work out what to draw
+    const srcNum=props[eo*64+11];
+    // if no matching src element, draw a rect and continue
+    if(srcNum<0||srcNum>vm.length-1-1){
+      // vm.length-1-1 since [0] is occupied by the buffer
+      setCtxClr(props[eo*64+7],props[eo*64+8],props[eo*64+9],props[eo*64+10]);
+      ctx.fillRect(lPx,tPx,wPx,hPx);
+      continue;
+    }
+    // if still here, switch depending on ele type
+    const ele=vm[1+srcNum];
+    if(ele instanceof HTMLImageElement){
+      ctx.drawImage(ele,lPx,tPx,wPx,hPx);
+    }else if(typeof ele==="string"){
+      setCtxClr(props[eo*64+7],props[eo*64+8],props[eo*64+9],props[eo*64+10]);
+      const fsPx=Math.max(props[eo*64+16]*pUPx,1e-9);
+      const stCh=Math.max(0,props[eo*64+14]);
+      const enCh=Math.min(ele.length,Math.max(stCh,props[eo*64+15]));
+      drawTxt(ele,stCh,enCh,fsPx,wPx,lPx,tPx);
+    }else if(ele instanceof HTMLAudioElement){
+      if(!ele.called){
+        ele.called=true;
+        if(ele.paused&&ele.readyState>2){
+          ele.play();
+        }
+      }
+    }else if(ele instanceof HTMLVideoElement){
+      ctx.drawImage(ele,lPx,tPx,wPx,hPx);
+      if(!ele.called){
+        ele.called=true;
+        if(ele.paused&&ele.readyState>2){
+          ele.play();
+        }
+      }
+    }else if(Array.isArray(ele)){
+      read(ele,uPx,cxPx,cyPx,0,0,1);
+    }
+  }
+  // final pop of base struct
+  x-=3;
+  ctx.restore();
+  // counter drwStk overflow by popping anything else
+  while(x>0){
+    x-=3;
+    ctx.restore();
+  }
+  // pause any vid/aud elements not called on the frame, and reset .called
+  for(let i=1;i<vm.length;i++){
+    const ele=vm[i];
+    if(ele instanceof HTMLAudioElement&&!ele.called){
+      ele.pause();
+    }else if(ele instanceof HTMLVideoElement&&!ele.called){
+      ele.pause();
+    }
+    ele.called=false;
+  }
+};
+
+const setCtxClr=(r,g,b,a)=>{
+  const rCap=Math.max(0,Math.min(255,r*255+0.5|0));
+  const gCap=Math.max(0,Math.min(255,g*255+0.5|0));
+  const bCap=Math.max(0,Math.min(255,b*255+0.5|0));
+  ctx.fillStyle=`rgba(${rCap},${gCap},${bCap},${a})`;
+};
+
+const readSrcX=(vm,srcNum,tar)=>{
+  if(srcNum<0||srcNum>vm.length-1-1)return 0;
+  const ele=vm[1+srcNum];
+  if(ele instanceof HTMLImageElement){
+    const w=ele.imageWidth
+    const h=ele.imageHeight;
+    switch(tar){
+      case 0: return w;
+      case 1: return h;
+      case 2: return w/Math.min(w,h); // nw
+      case 3: return h/Math.min(w,h); // nh
+      case 4: return w/Math.max(w,h); // inw
+      case 5: return h/Math.max(w,h); // inh
+      case 6: return w/h; // ar
+      case 7: return h/w; // iar
+      case 8: return ele.complete?1:0;
+      default: return 0;
+    }
+  }else if(typeof ele==="string"){
+    return ele.charCodeAt(tar)||0;
+  }else if(ele instanceof HTMLAudioElement){
+  switch(tar){
+      case 0: return ele.currentTime;
+      case 1: return ele.playbackRate;
+      case 2: return ele.volume;
+      case 3: return ele.duration;
+      case 4: return ele.ended?1:0;
+      case 5: return ele.loop?1:0;
+      case 6: return ele.readyState;
+      default: return 0;
+    }
+  }else if(ele instanceof HTMLVideoElement){
+    const w=ele.videoWidth;
+    const h=ele.videoHeight;
+    switch(tar){
+      case 0: return w;
+      case 1: return h;
+      case 2: return w/Math.min(w,h); // nw
+      case 3: return h/Math.min(w,h); // nh
+      case 4: return w/Math.max(w,h); // inw
+      case 5: return h/Math.max(w,h); //inh
+      case 6: return w/h; // ar
+      case 7: return h/w; // iar
+      case 8: return ele.currentTime;
+      case 9: return ele.playbackRate;
+      case 10: return ele.volume;
+      case 11: return ele.duration;
+      case 12: return ele.ended?1:0;
+      case 13: return ele.loop?1:0;
+      case 14: return ele.readyState;
+      default: return 0;
+    }
+  }else if(Array.isArray(ele)){
+    const meta=new Uint8Array(ele,0,2);
+    const instrEnd=meta[0]<<8;
+    const eoCnt=meta[1];
+    const v8=new Uint8Array(ele,0,instrEnd);
+    let y=instrEnd; // iterator for declaring views
+    const pf=new Float64Array(ele,y,64); y+=64*8;
+    const props=new Float64Array(ele,y,eoCnt*64); y+=eoCnt*64*8;
+    const glbs64=new Float64Array(ele,y,64); y+=64*8;
+    const glbs8=new Uint8Array(ele,y,192); y+=192;
+    if(tar>0){
+      if(tar<64)return glbs64[tar];
+      else if(tar<320)return glbs8[tar-64];
+      else return 0;
+    }else{
+      return 0;
+    }
+  }
+};
+
+const writeSrcX=(vm,srcNum,tar,val)=>{
+  if(srcNum<0||srcNum>vm.length-1-1)return;
+  const ele=vm[1+srcNum];
+  if(ele instanceof HTMLImageElement){
+    switch(tar){
+      case 0: ele.width=val; break;
+      case 1: ele.height=val; break;
+    }
+  }else if(typeof ele==="string"){
+    if(tar>=0)vm[3+srcNum]=ele.slice(0,tar)+String.fromCharCode(val)+ele.slice(tar+1);
+  }else if(ele instanceof HTMLAudioElement){
+    switch(tar){
+      case 0: ele.currentTime=val; break;
+      case 1: ele.playbackRate=val; break;
+      case 2: ele.volume=val; break;
+      case 5: ele.loop=!!val; break;
+    }
+  }else if(ele instanceof HTMLVideoElement){
+    switch(tar){
+      case 8: ele.currentTime=val; break;
+      case 9: ele.playbackRate=val; break;
+      case 10: ele.volume=val; break;
+      case 13: ele.loop=!!val; break;
+    }
+  }else if(Array.isArray(ele)){
+    const meta=new Uint8Array(ele,0,2);
+    const instrEnd=meta[0]<<8;
+    const eoCnt=meta[1];
+    const v8=new Uint8Array(ele,0,instrEnd);
+    let y=instrEnd; // iterator for declaring views
+    const pf=new Float64Array(ele,y,64); y+=64*8;
+    const props=new Float64Array(ele,y,eoCnt*64); y+=eoCnt*64*8;
+    const glbs64=new Float64Array(ele,y,64); y+=64*8;
+    const glbs8=new Uint8Array(ele,y,192); y+=192;
+    if(tar>0){
+      if(tar<64)glbs64[tar]=val;
+      else if(tar<320)glbs8[tar-64]=val;
+    }
+  }
+};
+
+// simplistic word-wrap
+const drawTxt=(str,stCh,enCh,fsPx,wPx,lPx,tPx)=>{
+  ctx.font=`${fsPx}px monospace`;
+  const lnW=Math.max(1,Math.floor(wPx/(fsPx/1.6664)));
+  let curStCh=stCh,curTop=0;
+  for(let i=stCh;i<enCh;i++){
+    if(str[i]==='\n'){
+      ctx.fillText(str.slice(curStCh,i),lPx,tPx+curTop);
+      curStCh=i+1; curTop+=fsPx;
+    }
+    else if(i-curStCh+1===lnW){
+      let brk=i;
+      if(str[i]!==' '&&str[i+1]!==' '){
+        while(brk>curStCh&&str[brk]!==' ')brk--;
+        if(brk===curStCh) brk=i;
+      }
+      ctx.fillText(str.slice(curStCh,brk+1),lPx,tPx+curTop);
+      curTop+=fsPx;
+      curStCh=brk+1;
+      while(curStCh<enCh&&str[curStCh]===' ')curStCh++;
+      i=curStCh-1;
+    }
+  }
+  if(curStCh<enCh)ctx.fillText(str.slice(curStCh,enCh),lPx,tPx+curTop);
+};
+
+// webpage setup
+const onLoad=()=>{
+  // maintains > during cons input
+  const consInpInp=e=>{
+    const v=e.target.value;
+    if(v[0]!='>') e.target.value='>'+v;
+    // ensure caret never left of >
+    if(e.target.selectionStart<1) e.target.setSelectionRange(1,1);
+  };
+  // fs exit listener (seperate func handles the actual event)
+  const fsExit=()=>{
+    if(!document.fullscreenElement)cOut('Exited fullscreen');
+    refresh();
+  };
+  // consInput kd: run console cmd and clear
+  const consInpKd=e=>{
+    // prevent moving left of >
+    if(e.key==='ArrowLeft' && e.target.selectionStart<=1){
+      e.preventDefault();
+      e.target.setSelectionRange(1,1);
+    }
+    if(e.key==='Enter'){
+      const str=e.target.value;
+      cOut(str,true);
+      consCmd(str);
+      e.target.value='>';
+      e.target.setSelectionRange(1,1);
+    }
+  };
+  // maintains indent on cw new ln, nice QOL feature
+  const cwKd=(e)=>{
+    if(e.key==='Enter'){
+      e.preventDefault();
+      const cw=codeWriter,cwV=cw.value;
+      const s=codeWriter.selectionStart;
+      const lS=cwV.lastIndexOf('\n',s-1)+1;
+      let i=lS,c=0;
+      while(cwV[i]===' '){c++;i++;}
+      const pad='\n'+Array(c+1).join(' ');
+      codeWriter.value=cwV.substring(0,s)+pad+cwV.substring(cw.selectionEnd);
+      codeWriter.selectionStart=cw.selectionEnd=s+pad.length;
+      // cw.scrollLeft=0,cw.scrollTop+=18;
+      glbCpl();
+    }
+  };
+  // webpage selected area, called by mouse/touch, or tabkey:
+  const setSelectionState=n=>{
+    selectionState=n;
+    curtain.style.background=n===1?'#AA0000':null;
+    cwSelect.style.background=n===2?'#AA0000':null;
+    consSelect.style.background=n===3?'#AA0000':null;
+    codeWriter.style.cursor=n===2?null:'default';
+    consInp.style.cursor=n===3?null:'default';
+    canv.style.pointerEvents='none';
+    codeWriter.style.pointerEvents='none';
+    consInp.style.pointerEvents='none';
+    consoleDiv.style.pointerEvents='none';
+    if(n===1)canv.style.pointerEvents='auto';
+    else if(n===2)codeWriter.style.pointerEvents='auto';
+    else if(n===3){
+      consInp.style.pointerEvents='auto';
+      consoleDiv.style.pointerEvents='auto';
+    }
+    consInp.value='>';
+    if(n===0)document.body.focus();
+    else if(n===1)canv.focus();
+    else if(n===2)codeWriter.focus();
+    else if(n===3){
+      consInp.focus();
+      consInp.selectionStart=consInp.selectionEnd=consInp.value.length;
+    }
+  };
+  // exit webpage area selection with escape (aka nullstate)
+  const keyboardSelect=e=>{
+    if(e.key==='Escape')setSelectionState(0);
+    else if(e.key==='Tab'){
+      e.preventDefault();
+      setSelectionState(selectionState===3?1:selectionState+1);
+    }
+  };
+  // keyDown->glbVm keyPr/keyDwn on
+  const glbKeyDwn=e=>{
+    if(selectionState!==1)return;
+    const idx=e.key.charCodeAt(0)-97;
+    if(idx<0||idx>25)return;
+    glbVmGlbs8[idx]=1;
+    glbVmGlbs8[26+idx]=1;
+  };
+  // keyUp->glbVm keyUp on, keyPr off
+  const glbKeyUp=e=>{
+    if(selectionState!==1)return;
+    const idx=e.key.charCodeAt(0)-97;
+    if(idx<0||idx>25)return;
+    glbVmGlbs8[idx]=0;
+    glbVmGlbs8[52+idx]=1;
+  };
+  // select webpage area with click or tap
+  const mouseOrTouchSelect=e=>{
+    const x=e.clientX,y=e.clientY;
+    const a=canv.getBoundingClientRect();
+    const ax=a.x,ay=a.y,aw=a.width,ah=a.height;
+    const b=cwSelect.getBoundingClientRect();
+    const bx=b.x,by=b.y,bw=b.width,bh=b.height;
+    const c=consSelect.getBoundingClientRect();
+    const cx=c.x,cy=c.y,cw=c.width,ch=c.height;
+    if(x>=ax&&x<=ax+aw&&y>=ay&&y<=ay+ah&&selectionState!==1)
+      setSelectionState(1),e.preventDefault();
+    else if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh&&selectionState!==2)
+      setSelectionState(2),e.preventDefault();
+    else if(x>=cx&&x<=cx+cw&&y>=cy&&y<=cy+ch&&selectionState!==3)
+      setSelectionState(3),e.preventDefault();
+  };
+  // 3 funcs, canvasDrag->glbVm OX/OY
+  const canvPtrDwn=(e)=>{
+    e.preventDefault();
+    tchs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  };
+  const canvPtrUp=(e)=>{
+    e.preventDefault();
+    tchs.delete(e.pointerId);
+  };
+  const canvPtrMm=(e)=>{
+    e.preventDefault();
+    if(!tchs.has(e.pointerId))return; // aka not yet pressed
+    const oldX=tchs.get(e.pointerId).x,oldY=tchs.get(e.pointerId).y;
+    const newX=e.clientX,newY=e.clientY;
+    // 1: pan
+    let sumX=0,sumY=0; for(let[k,v]of tchs)sumX+=v.x,sumY+=v.y;
+    const intlAvgX=sumX/tchs.size,intlAvgY=sumY/tchs.size;
+    sumX-=oldX; sumY-=oldY; sumX+=newX; sumY+=newY;
+    const newAvgX=sumX/tchs.size,newAvgY=sumY/tchs.size;
+    ox+=(newAvgX-intlAvgX)*pd; oy+=(newAvgY-intlAvgY)*pd;
+    // 2: scale 
+    let distSum=0;
+    for(let[k,v]of tchs)distSum+=Math.hypot(v.x-intlAvgX,v.y-intlAvgY);
+    const intlAvgDist=distSum/tchs.size;
+    distSum-=Math.hypot(oldX-intlAvgX,oldY-intlAvgY);
+    distSum+=Math.hypot(newX-intlAvgX,newY-intlAvgY);
+    const newAvgDist=distSum/tchs.size;
+    const ds=intlAvgDist===0?1:newAvgDist/intlAvgDist;
+    os*=ds; // might be old avg x or might feel more natural to do in other order..
+    ox=ox*ds+(intlAvgX-cx)*(1-ds);
+    oy=oy*ds+(intlAvgY-cy)*(1-ds);
+    // 3: set new vals for other/future move calls
+    tchs.get(e.pointerId).x=e.clientX; tchs.get(e.pointerId).y=e.clientY;
+  };
+  // mousewheel->OS/OX/OY
+  const canvOS=(e)=>{
+    const edy=e.deltaY;
+    if(e.ctrlKey){oy+=(0.2*edy);return;}
+    else if(e.altKey){ox+=(0.2*edy);return;}
+    const iOS=os;
+    const newOS=Math.min(1000,Math.max(0.01,iOS+0.001*iOS*-edy));
+    os=newOS;
+    const ds=newOS/iOS; // delta scale
+    ox=ox*ds+(e.clientX-cx)*(1-ds)*pd; // adj ox
+    oy=oy*ds+(e.clientY-cy)*(1-ds)*pd; // adj oy
+  };
+  const setOrientation=e=>{
+    glbVmGlbs64[5]=e.beta||0;   // pitch
+    glbVmGlbs64[6]=e.gamma||0;  // roll
+    glbVmGlbs64[7]=e.alpha||0;  // yaw
+  };
+  const consInpFocus=e=>{
+    e.target.value='>';
+    e.target.setSelectionRange(1,1);
+  };
+  setupGlbs();
+  refresh();
+  window.addEventListener('resize',refresh);
+  document.addEventListener('pointerdown', mouseOrTouchSelect);
+  document.addEventListener('keydown',keyboardSelect);
+  document.addEventListener('fullscreenchange',fsExit);
+  document.addEventListener("visibilitychange",()=>setSelectionState(0));
+  document.addEventListener('keydown',glbKeyDwn);
+  document.addEventListener('keyup',glbKeyUp);
+  codeWriter.addEventListener('keydown',cwKd);
+  codeWriter.addEventListener('input',e=>glbCpl());
+  canv.addEventListener('pointerdown',canvPtrDwn);
+  canv.addEventListener('pointerup',canvPtrUp);
+  canv.addEventListener('pointercancel',canvPtrUp);
+  canv.addEventListener('pointermove',canvPtrMm);
+  canv.addEventListener('wheel',canvOS);
+  consInp.addEventListener('keydown',consInpKd);
+  consInp.addEventListener('input',consInpInp);
+  consInp.addEventListener('focus',consInpFocus);
+  consInp.addEventListener('blur',consInpFocus);
+  cOut(' ');
+  cOut('      █████████');
+  cOut('      ███████████');
+  cOut('   ████████');
+  cOut('   ████████');
+  cOut('   ████████');
+  cOut('███████████');
+  cOut(' █████████');
+  cOut(' ');
+  cOut('Eventscript v1. Try commands HELP,LICENSE,MANUAL');
+  window.addEventListener("deviceorientation",setOrientation);
+  animId=requestAnimationFrame(readGlbVm);
+};
+
+// calls glbVm read with dt/gt/d, use in onload or manual restart
+const readGlbVm=()=>{
+  const dt=0.001*performance.now()-pgT;
+  pgT+=dt;
+  glbVmGlbs64[0]=dt;
+  glbVmGlbs64[1]+=dt;
+  glbVmGlbs64[2]=Date.now();
+  // initial clear
+  ctx.fillStyle=`rgba(${0},${0},${0},${1})`;
+  ctx.fillRect(0,0,rw,rh); // set to host glbs voidcolors later
+  // sub scrs ofc use bgColor
+  read(glbVm,ru,rcx,rcy,ox,oy,os);
+  animId=requestAnimationFrame(readGlbVm);
+};
+
+// refresh display glbs eg on any resize
+const refresh=e=>{
+  rw=canv.offsetWidth*pd;
+  rh=canv.offsetHeight*pd;
+  ru=Math.min(rw,rh);
+  rcx=0.5*rw;
+  rcy=0.5*rh;
+  cx=0.5*canv.offsetWidth;
+  cy=0.5*canv.offsetHeight;
+  canv.width=rw;
+  canv.height=rh;
+  ctx.imageSmoothingEnabled=false; 
+  ctx.textAlign='left';
+  ctx.textBaseline='top';
+};
+
+// console-write, click for auto-copy
+const cOut=(str,frUser=false)=>{
+  const span=document.createElement('span');
+  span.appendChild(document.createTextNode(str));
+  span.className='consoleLn'; 
+  span.onmousedown=()=>{
+    if(!span.style.animation){
+      span.style.color='navy';
+      navigator.clipboard.writeText(str);
+      span.style.animation='colorFade 0.9s ease-in-out forwards';
+      setTimeout(()=>{span.style.animation=null;span.style.color=null;},800);
+    }
+  };
+  consoleDiv.appendChild(span);
+  consoleDiv.scrollTop=consoleDiv.scrollHeight;
+};
+
+// preps export into friendly copy-paste version
+const prepExp=(str)=>{
+  const map={
+    ' ':'a','\n':'b','+':'c','-':'d','*':'h','/':'i','%':'j','&':'k','|':'l','^':'m',
+    '=':'n','<':'o','>':'p','!':'q','.':'r','?':'s','(':'t',')':'u'
+  };
+
+  // 1:syms->frLetters,2:sp->awxyz,3:srcs->quotes
+  const o=[]; // output chs, join at end
+  let z=0; // qMap iterator
+  let nxQ=qMap[z++]; // in order so check each ch against next
+  let qFlg=false; // if inside quotes, transfer chs without conversion
+  let lastSpCnt=0; // track space cnt of prev line, for mutli-sp shorthand
+  for(let i=0;i<str.length;i++){
+    const ch=str[i];
+    if(nxQ===i){
+      o.push('"',map[ch]?map[ch]:ch);
+      nxQ=qMap[z++];
+      qFlg=!qFlg;
+    }else if(qFlg){
+      o.push(ch);
+    }else{
+      let spCnt=0;
+      let z=i;
+      while(str[z]===' '){
+        spCnt++;
+        z++;
+      }
+      if(spCnt>0){
+        if(spCnt>5)spCnt=5;
+        switch(spCnt){
+          case 1:o.push('a');break;
+          case 2:o.push('v');break;
+          case 3:o.push('w');break;
+          case 4:o.push('y');break;
+          case 5:o.push('z');break;
+        }
+        i+=spCnt-1;
+      }else{
+        o.push(map[ch]?map[ch]:ch);
+      }
+    }
+  }
+  // pop final nxQ
+  if(nxQ===str.length)o.push('"');
+  return o.join('');
+};
+
+// 1:frLetter->sym,2:awxyz->sp,3:cuts quotes and igns interior
+const prepImp=(str)=>{
+  let qFlg=false;
+  const o=[];
+  const map={
+    a:' ',b:'\n',c:'+',d:'-',h:'*',i:'/',j:'%',k:'&',l:'|',m:'^',n:'=', 
+    o:'<',p:'>',q:'!',r:'.',s:'?',t:'(',u:')',
+    v:'  ',w:'   ',y:'    ',z:'     '
+  };
+  for(let i=0;i<str.length;i++){
+    if(str[i]=='"')qFlg=!qFlg;
+    else if(!qFlg&&map[str[i]])o.push(map[str[i]]);
+    else o.push(str[i]);
+  }
+  return o.join('');
+};
+
+// base64 sha-256, for use by small cons-called funcs
+const sha256Base64=async(arrayBuffer)=>{
+  const typedArr=new Uint8Array(await crypto.subtle.digest('SHA-256',arrayBuffer));
+  const chArr=new Array(32);
+  for (let i=0;i<typedArr.length;i++)chArr[i]=String.fromCharCode(typedArr[i]);
+  return btoa(chArr.join('')).slice(0, -1);
+};
+
+// base64k sha-256, experimental alt fingerprint
+const sha256Base64k=async(arrayBuffer)=>{
+  const typedArr=new Uint16Array(await crypto.subtle.digest('SHA-256', arrayBuffer));
+  const chArr=new Array(16);
+  for (let i=0;i<16;i++)chArr[i]=String.fromCodePoint(0xF0000+typedArr[i]);
+  return chArr.join('');
+};
+
+// console commands
+const consCmd=(str)=>{
+  const fullscreen=()=>{
+    cOut('Entering fullscreen');
+    try{document.body.requestFullscreen(); refresh();}
+    catch{cOut('FS blocked by browser. Mobile users: try MFS');}
+  };
+  const rat=()=>{
+    if(argNum>=10&&argNum<=75){
+      document.body.style.setProperty('--r',argNum);
+      cOut(`Canv-workspace ratio: ${argNum}%`);
+    }else {
+      cOut('RAT expects a number between 10 and 75');
+    }
+    refresh();
+  };
+  const upload=()=>{
+    const hdlChange=async(e)=>{
+      const files=Array.from(e.target.files);
+      cOut(`${files.length} files submitted`);
+      for(let i=0;i<files.length;i++){
+        const file=files[i];
+        locFiles[file.name]=URL.createObjectURL(file);
+        cOut(`${i+1}`);
+        cOut(`${file.name}`);
+        cOut(`${(file.size/1000).toFixed(1)}KB`);
+      }
+      glbCpl();
+      inp.remove();
+    };
+    const inp=document.createElement('input');
+    inp.type='file';
+    inp.multiple=true;
+    inp.addEventListener('change', hdlChange);
+    inp.style.display='none';
+    document.body.appendChild(inp);
+    cOut('Uploading local files');
+    inp.click();
+  };
+  const screenshot=()=>{
+    const url=canv.toDataURL('image/'+fileType);
+    const ele=document.createElement('a');
+    ele.href=url;
+    ele.download='ss.'+fileType;
+    document.body.appendChild(ele);
+    ele.click();
+    document.body.removeChild(ele);
+  };
+  const drawOn=()=>{
+    cOut('drawOn');
+    animId=requestAnimationFrame(readGlbVm);
+  };
+  const drawOff=()=>{
+    cOut('drawOff');
+    cancelAnimationFrame(animId);
+  };
+  const expFile=async()=>{
+    const expStr=prepExp(codeWriter.value);
+    const buf=new TextEncoder().encode(expStr).buffer;
+    const hash=await sha256Base64(buf);
+    const blob=new Blob([expStr],{type:'text/plain'});
+    const textExpUrl=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=textExpUrl;a.download=hash+'.txt';
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(textExpUrl);
+    document.body.removeChild(a);
+  };
+  const impFile=()=>{
+    const input=document.createElement('input');
+    input.type='file';
+    input.onchange=async()=>{
+      const txt=await input.files[0].text();
+      codeWriter.value=prepImp(txt); 
+      glbCpl();
+      input.remove();
+    };
+    input.click();
+  };
+  const req=()=>{
+    cOut('requesting permission to read roll/yaw/pitch (and others)');
+    if(typeof DeviceOrientationEvent.requestPermission!=='function')
+      cOut('device orientation permission request not supported');
+    else
+    DeviceOrientationEvent.requestPermission().then(r=>{
+      cOut(r==='granted'?'permission granted':'permission denied');
+    })
+  };
+  const cfs=()=>{
+    cOut('Entering canvas fullscreen');
+    try{
+      canv.requestFullscreen();
+      refresh();
+    }catch{
+      cOut('CFS blocked by browser. Mobile users: try MFS');
+    }
+  };
+  const mfs=()=>{
+    canv.style.width='100vw';
+    canv.style.height='100vh';
+    workspace.style.display='none';
+    refresh(null);
+    const reset=()=>{
+      canv.style.width=null;
+      canv.style.height=null;
+      workspace.style.display=null;
+      refresh();
+      document.removeEventListener('visibilitychange',reset);
+      document.removeEventListener('keydown',esc);
+    };
+    const esc=(e)=>{
+      if(event.key==='Escape')reset();
+    };
+    document.addEventListener('visibilitychange',h);
+    document.addEventListener('keydown',esc);
+  };
+  const exp=()=>{
+    cOut("```"+prepExp(codeWriter.value)+"```");
+  };
+  const imp=()=>{
+    codeWriter.value=prepImp(argStr).slice(3,-3); // cutting out trip backquotes
+    glbCpl();
+  };
+  const expUrl=()=>{
+    const url=location.origin+location.pathname+'#'+prepExp(codeWriter.value);
+    cOut(url);
+  };
+  const dumpBytes=()=>{
+    const meta=new Uint8Array(glbVm[0],0,2);
+    const instrEnd=meta[0]<<8;
+    const v8=new Uint8Array(glbVm[0],0,instrEnd);
+
+    // count trailing 38s
+    let trail=0;
+    for(let i=v8.length-1;i>=0;i--){
+      if(v8[i]===38) trail++;
+      else break;
+    }
+
+    const out=[];
+    const normalEnd=v8.length-trail;
+    for(let i=0;i<normalEnd;i++) out.push(v8[i]);
+
+    if(trail>0) out.push('38*'+trail);
+
+    cOut(out.join(','));
+  };
+
+  const dumpOps=()=>{
+    const meta=new Uint8Array(glbVm[0],0,2);
+    const instrEnd=meta[0]<<8;
+    const v8=new Uint8Array(glbVm[0],0,instrEnd);
+    const ops=[];
+    lp:for(let i=2;i<instrEnd;i++){
+      switch(v8[i]){
+        case 0: ops.push('ADD'); break;
+        case 1: ops.push('SUB'); break;
+        case 2: ops.push('MUL'); break;
+        case 3: ops.push('DIV'); break;
+        case 4: ops.push('MOD'); break;
+        case 5: ops.push('AND'); break;
+        case 6: ops.push('OR'); break;
+        case 7: ops.push('POW'); break;
+        case 8: ops.push('EQ'); break;
+        case 9: ops.push('LT'); break;
+        case 10: ops.push('GT'); break;
+        case 11: ops.push('LE'); break;
+        case 12: ops.push('GE'); break;
+        case 13: ops.push('NOT'); break;
+        case 14: ops.push('NE'); break;
+        case 15: ops.push('NEG'); break;
+        case 16: ops.push('COS'); break;
+        case 17: ops.push('SIN'); break;
+        case 18: ops.push('TAN'); break;
+        case 19: ops.push('ABS'); break;
+        case 20: ops.push('SQRT'); break;
+        case 21: ops.push('RANDINT'); break;
+        case 22: ops.push('RANDFLT'); break;
+        case 23: 
+          const num=v8[i+1]*16777216+v8[i+2]*65536+v8[i+3]*256+v8[i+4];
+          ops.push('WNUM'+num);
+          i+=4;
+          break;
+        case 24:
+          const intNum=v8[i+1]*256+v8[i+2];
+          const fracNum=(v8[i+3]*256+v8[i+4])/100000;
+          ops.push('DNUM'+(intNum+fracNum));
+          i+=4;
+          break;
+        case 25:
+          ops.push('RPROP'+v8[i+1]+'-'+v8[i+2]);
+          i+=2;
+          break;
+        case 26:
+          ops.push('RSRC'+v8[i+1]+'-'+v8[i+2]);
+          i+=2;
+          break;
+        case 27:
+          ops.push('R64GLB'+v8[i+1]);
+          i+=1;
+          break;
+        case 28:
+          ops.push('R8GLB'+v8[i+1]);
+          i+=1;
+          break;
+        case 29:
+          ops.push('WPROP'+v8[i+1]+'-'+v8[i+2]);
+          i+=2;
+          break;
+        case 30:
+          ops.push('WSRC'+v8[i+1]+'-'+v8[i+2]);
+          i+=2;
+          break;
+        case 31:
+          ops.push('W64GLB'+v8[i+1]);
+          i+=1;
+          break;
+        case 32:
+          ops.push('W8GLB'+v8[i+1]);
+          i+=1;
+          break;
+        case 33:
+          ops.push('DRW'+v8[i+1]);
+          i+=1;
+          break;
+        case 34:
+          ops.push('CHK'+(v8[i+1]*256+v8[i+2]));
+          i+=2;
+          break;
+        case 35:
+          ops.push('JMP'+(v8[i+1]*256+v8[i+2]));
+          i+=2;
+          break;
+        case 36:{
+          const eo=v8[i+1];
+          const cnt=v8[i+2];
+          const bigJmpTar=v8[i+3]*256+v8[i+4];
+          const jmpList=[];
+          for(let j=0;j<cnt;j++){
+            const idx=i+5+j*2;
+            jmpList.push(v8[idx]*256+v8[idx+1]);
+          }
+          ops.push('PGS'+eo+'-'+cnt+'-'+bigJmpTar+'['+jmpList.join(',')+']');
+          i+=4+cnt*2;
+          break;
+        }
+        case 37:{
+          const eo=v8[i+1];
+          const cnt=v8[i+2];
+          const bigJmpTar=v8[i+3]*256+v8[i+4];
+          const durs=[];
+          const jmpList=[];
+          const dursStart=i+5;
+          for(let k=0;k<cnt;k++){
+            const b0=v8[dursStart+k*4];
+            const b1=v8[dursStart+k*4+1];
+            const b2=v8[dursStart+k*4+2];
+            const b3=v8[dursStart+k*4+3];
+            durs.push(b0*16777216+b1*65536+b2*256+b3);
+          }
+          const jmpStart=dursStart+cnt*4;
+          for(let k=0;k<cnt;k++){
+            jmpList.push(v8[jmpStart+k*2]*256+v8[jmpStart+k*2+1]);
+          }
+          ops.push('TL'+eo+'-'+cnt+'-'+bigJmpTar+'('+durs.join(',')+')('+jmpList.join(',')+')');
+          i+=4+cnt*6;
+          break;
+        }
+        case 38: break lp; // maybe replace with 'NOP*126, like counting them'
+          // could actually do the same with bytes, would be helpful
+          // doesn't have to be general, can just be the specific case of NOP padding
+        default:
+          cOut('invalid vm instr, should not happen...');
+          cOut('plz fw exact code to Joe@eventscript.org');
+          return;
+      }
+    }
+    cOut(ops.join(','));
+  };
+  let z=0;
+  for(z=0;z<str.length;z++){if(str[z]===' ')break;}
+  const cmdStr=str.substring(0,z).toUpperCase();
+  const argStr=str.substring(z+1);
+  const argNum=Number(argStr);
+  switch(cmdStr){
+    case '>FS': fullscreen(); break; // runs error msg/suggests mfs if blocked
+    case '>RAT': rat(); break; // canv-workspace visual ratio
+    case '>UPL': upload(); break; // upl files to loc ram (ie to locFiles)
+    case '>SS': screenshot(); break; // screenshot canv
+    case '>DON': drawOn(); break; // draw on
+    case '>DOFF': drawOff(); break; // draw off
+    case '>EXPFILE': expFile(); break; // export scr as txt file
+    case '>IMPFILE': impFile(); break; // import txt file scr
+    case '>REQ': req(); break; // requests roll/pitch/yaw
+    case '>CFS': cfs(); break; // canvas fullscreen
+    case '>MFS': mfs(); break; // mobile fs (just stretches canv over workspace)
+    case '>EXP': exp(); break; // export scr as friendly code in console
+    case '>URL': expUrl(); break; // same as >EXP but url and ? in front
+    case '>BYTES': dumpBytes(); break; // dumps raw bytes of glbVm to console
+    case '>OPS': dumpOps(); break; // dump OPS (aka friendly, readable vers of glbVm)
+  }
+};
+
+
+
+</script></body>
