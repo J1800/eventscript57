@@ -1316,7 +1316,9 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
     // if still here, switch depending on ele type
     const ele=vm[1+srcNum];
     if(ele instanceof HTMLImageElement){
-      ctx.drawImage(ele,lPx,tPx,wPx,hPx);
+      if(ele.complete&&ele.naturalWidth>0){
+        ctx.drawImage(ele,lPx,tPx,wPx,hPx);
+      }
     }else if(typeof ele==="string"){
       setCtxClr(props[eo*64+7],props[eo*64+8],props[eo*64+9],props[eo*64+10]);
       const fsPx=Math.max(props[eo*64+16]*pUPx,1e-9);
@@ -1331,7 +1333,9 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
         }
       }
     }else if(ele instanceof HTMLVideoElement){
-      ctx.drawImage(ele,lPx,tPx,wPx,hPx);
+      if(ele.readyState>1){
+        ctx.drawImage(ele,lPx,tPx,wPx,hPx);
+      }
       if(!ele.called){
         ele.called=true;
         if(ele.paused&&ele.readyState>2){
