@@ -20,15 +20,15 @@
     @font-face{font-family:DOSEGA;src:url('DOSEGA.ttf') format('truetype');}
     html{overscroll-behavior:none}
     body{--r:75;background:black;/**/margin:0}
-    #canv{background-color:black;outline:none;pointer-events:none;position:fixed;touch-action:none}
-    #codeWriter{background-color:#000000;border:none;border-radius:0;color:#AAAAAA;font-size:16px;font-family:Menlo,Monaco,monospace;outline:none;pointer-events:none;position:absolute;resize:none;scrollbar-color:#5a5a5a transparent;touch-action:none;white-space:pre}
-    #consInp{background-color:#000000;border:none;/**/border-radius:0;/**/bottom:8px;color:#AAAAAA;font-family:DOSEGA,monospace;font-size:16px;outline:none;pointer-events:none;position:absolute;right:8px;top:calc(100% - 24px);touch-action:none}
+    #canv{background-color:black;outline:none;position:fixed;touch-action:none}
+    #codeWriter{background-color:#000000;border:none;border-radius:0;color:#AAAAAA;font-size:16px;font-family:Menlo,Monaco,monospace;outline:none;position:absolute;resize:none;scrollbar-color:#5a5a5a transparent;touch-action:none;white-space:pre}
+    #consInp{background-color:#000000;border:none;/**/border-radius:0;/**/bottom:8px;color:#AAAAAA;font-family:DOSEGA,monospace;font-size:16px;outline:none;position:absolute;right:8px;top:calc(100% - 24px);touch-action:none}
     #consSelect{bottom:0;position:absolute;right:0;}
-    #consoleDiv{background-color:#000000;bottom:32px;color:#AAAAAA;display:flex;flex-direction:column;font-size:16px;justify-content:flex-end;overflow-x:hidden;overflow-y:auto;overscroll-behavior:none;padding:6px;pointer-events:none;position:absolute;right:8px;scrollbar-color:#4d63b0 transparent;scroll-behavior:smooth;touch-action:none;word-wrap:break-word}
+    #consoleDiv{background-color:#000000;bottom:32px;color:#AAAAAA;display:flex;flex-direction:column;font-size:16px;justify-content:flex-end;overflow-x:hidden;overflow-y:auto;overscroll-behavior:none;padding:6px;position:absolute;right:8px;scrollbar-color:#4d63b0 transparent;scroll-behavior:smooth;touch-action:none;word-wrap:break-word}
     .consoleLn{cursor:default;font-family:DOSEGA,monospace;text-align:center;}
     #curtain{position:absolute;background:#00AAAA}
     #cwSelect{position:absolute}
-    #workspace{background:#0000AA;bottom:0;pointer-events:none;position:fixed;right:0;touch-action:none}
+    #workspace{background:#0000AA;bottom:0;position:fixed;right:0;touch-action:none}
     @keyframes colorFade{0%{background-color:#a88f05}100%{background-color:#6b7dc6}}
     @media(orientation:landscape){
       #canv{height:100dvh;width:calc(var(--r) * 1dvw)}
@@ -101,6 +101,9 @@
   glb8s:
     0-25:keyPr(a-z),26-51:keyDwn(a-z),52-77:keyUp(a-z)
     78-82:mousePr(0-5),83-87:mouseDwn(0-5),88-92:mouseUp(0-5),93-191:custom
+  
+  functions:
+    +0:cos,+1:sin,+2:tan,+3:abs,+4:sqrt,+5:randInt,+6:randFlt
 
   instrs:
     0:ADD,1:SUB,2:MUL,3:DIV,4:MOD,5:AND,6:OR,7:POW,8:EQ,9:LT,10:GT,11:LE,
@@ -118,7 +121,7 @@ let buffInUse,tMap,bScr,lnStChs,lnEnChs,lnDpts,lnPars,lnMCnts,lnMIdxs,lnJmps;
 let lnMap,bStk,buff,a8,a32,dfa,maxE,propDfts,pm,sh,selectionState;
 let ctx,pd,rw,rh,ru,cx,cy,rcx,rcy,pgT,animId,ox,oy,os,tchs,locFiles;
 let imgBckt,sndBckt,vidBckt,blankVm,glbVm,recursiveEoCnt,qMap,mainFlg;
-let glbVmGlbs64,glbVmGlbs8;
+let glbVmGlbs64,glbVmGlbs8,lblsMap,revLblsMap;
 
 // sets glbs above, runs once onload
 const setupGlbs=()=>{
@@ -220,6 +223,10 @@ const setupGlbs=()=>{
   glbCpl(); // glbCpl also sets  glbVmGlbs64 and glbVmGlbs8;
   // which are basically easy-access views of the glbVm
   // for keydown, mousemove etc to edit globals inside glbVm
+  // filling lbls map used in cmd LABELS and RAW
+  lblsMap={};
+  revLblsMap={};
+  setupLbs();
 };
 
 // manually fills big DFA used by cpl
@@ -411,6 +418,45 @@ const setupDFA=()=>{
     argFill(48);  // into operators
     digsFill(48); // digs->self(48)
 };
+
+const setupLbs=()=>{
+  for(let i=5;i>=0;i--){
+    lblsMap['g'+(64+88+i)]='mouse'+i+'Up';
+    revLblsMap['mouse'+i+'Up']='g'+(64+88+i);
+    lblsMap['g'+(64+83+i)]='mouse'+i+'Down';
+    revLblsMap['mouse'+i+'Down']='g'+(64+83+i);
+    lblsMap['g'+(64+78+i)]='mouse'+i;
+    revLblsMap['mouse'+i]='g'+(64+78+i);
+  }
+  const letters='abcdefghijklmnopqrstuvwxyz';
+  for(let i=25;i>=0;i--){
+    const c=letters[i].toUpperCase();
+    lblsMap['g'+(64+52+i)]='key'+c+'Up';
+    revLblsMap['key'+c+'Up']='g'+(64+52+i);
+    lblsMap['g'+(64+26+i)]='key'+c+'Down';
+    revLblsMap['key'+c+'Down']='g'+(64+26+i);
+    lblsMap['g'+(64+i)]='key'+c;
+    revLblsMap['key'+c]='g'+(64+i);
+  }
+  const g64sLabels=['dt','scrT','date','cursX','cursY','pitch','roll','yaw','ar','nw','nh'];
+  for(let i=g64sLabels.length-1;i>=0;i--){
+    lblsMap['g'+i]=g64sLabels[i];
+    revLblsMap[g64sLabels[i]]='g'+i;
+  }
+  const fLabels=['cos','sin','tan','abs','sqrt','randInt','randFlt'];
+  for(let i=fLabels.length-1;i>=0;i--){
+    lblsMap['f'+i]=fLabels[i];
+    revLblsMap[fLabels[i]]='f'+i;
+  }
+  const xLabels=['scale','left','top','width','height','opacity','rotate','red','green','blue','alph','source','time','page','stch','endch','fontsize','bgRed','bgGreen','bgBlue','bgAlpha'];
+  for(let i=xLabels.length-1;i>=0;i--){
+    lblsMap['x'+i]=xLabels[i];
+    revLblsMap[xLabels[i]]='x'+i;
+  }
+};
+
+
+
 
 // compiler, str->vm
 const cpl=(str)=>{
@@ -1565,16 +1611,6 @@ const onLoad=()=>{
     consSelect.style.background=n===3?'#AA0000':null;
     codeWriter.style.cursor=n===2?null:'default';
     consInp.style.cursor=n===3?null:'default';
-    canv.style.pointerEvents='none';
-    codeWriter.style.pointerEvents='none';
-    consInp.style.pointerEvents='none';
-    consoleDiv.style.pointerEvents='none';
-    if(n===1)canv.style.pointerEvents='auto';
-    else if(n===2)codeWriter.style.pointerEvents='auto';
-    else if(n===3){
-      consInp.style.pointerEvents='auto';
-      consoleDiv.style.pointerEvents='auto';
-    }
     consInp.value='>';
     if(n===0)document.body.focus();
     else if(n===1)canv.focus();
@@ -1618,11 +1654,11 @@ const onLoad=()=>{
     const c=consSelect.getBoundingClientRect();
     const cx=c.x,cy=c.y,cw=c.width,ch=c.height;
     if(x>=ax&&x<=ax+aw&&y>=ay&&y<=ay+ah&&selectionState!==1)
-      setSelectionState(1),e.preventDefault();
+      setSelectionState(1);
     else if(x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh&&selectionState!==2)
-      setSelectionState(2),e.preventDefault();
+      setSelectionState(2);
     else if(x>=cx&&x<=cx+cw&&y>=cy&&y<=cy+ch&&selectionState!==3)
-      setSelectionState(3),e.preventDefault();
+      setSelectionState(3);
   };
   // 3 funcs, canvasDrag->glbVm OX/OY
   const canvPtrDwn=(e)=>{
@@ -2122,6 +2158,16 @@ const consCmd=(str)=>{
     }
     cOut(ops.join(','));
   };
+  const labels=()=>{
+    let txt=codeWriter.value;
+    for(const k in lblsMap){
+      txt=txt.replaceAll(k,lblsMap[k]);
+    }
+    codeWriter.value=txt;
+  };
+  const raw=()=>{
+
+  };
   let z=0;
   for(z=0;z<str.length;z++){if(str[z]===' ')break;}
   const cmdStr=str.substring(0,z).toUpperCase();
@@ -2143,6 +2189,8 @@ const consCmd=(str)=>{
     case '>URL': expUrl(); break; // same as >EXP but url and ? in front
     case '>BYTES': dumpBytes(); break; // dumps raw bytes of glbVm to console
     case '>OPS': dumpOps(); break; // dump OPS (aka friendly, readable vers of glbVm)
+    case '>LABELS': labels(); break; // replaces x0, x1, etc, with labels
+    case '>RAW': raw(); break; // reverses labels
   }
 };
 
