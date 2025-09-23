@@ -32,8 +32,8 @@
     #codeWriter{background-color:#000000;border:none;border-radius:0;color:#AAAAAA;font-size:16px;font-family:Menlo,Monaco,monospace;outline:none;position:absolute;resize:none;scrollbar-color:#5a5a5a transparent;white-space:pre}
     #consInp{background-color:#000000;border:none;/**/border-radius:0;/**/bottom:8px;color:#AAAAAA;font-family:DOSEGA,monospace;font-size:16px;outline:none;position:absolute;right:8px;top:calc(100% - 24px);touch-action:none}
     #consSelect{bottom:0;position:absolute;right:0;}
-    #consoleDiv{background-color:#000000;bottom:32px;color:#AAAAAA;display:flex;flex-direction:column;font-size:14px;justify-content:flex-end;overflow-x:hidden;overflow-y:auto;overscroll-behavior:none;padding:6px;position:absolute;right:8px;scrollbar-color:#4d63b0 transparent;scroll-behavior:smooth;word-wrap:break-word}
-    .consoleLn{cursor:default;font-family:DOSEGA,monospace;text-align:center;}
+    #consoleDiv{background-color:#000000;bottom:32px;color:#AAAAAA;display:flex;flex-direction:column;font-size:14px;justify-content:flex-end;overflow-x:hidden;overflow-y:auto;overscroll-behavior:none;padding:6px;position:absolute;right:8px;scrollbar-color:#4d63b0 transparent;scroll-behavior:smooth;word-wrap:break-word;user-select:none;}
+    .consoleLn{cursor:default;font-family:DOSEGA,monospace;text-align:center;user-select:none;}
     #curtain{position:absolute;background:#00AAAA}
     #cwSelect{position:absolute}
     #workspace{background:#0000AA;bottom:0;position:fixed;right:0;touch-action:none}
@@ -1681,20 +1681,25 @@ const onLoad=()=>{
   // 3 funcs, canvasDrag->glbVm OX/OY
   const canvPtrDwn=(e)=>{
     e.preventDefault();
+    const first=tchs.size===0;
     // set tch for running pointerMov event
     tchs.set(e.pointerId,{x:e.clientX,y:e.clientY});
     // update click/cursorglbs
-    setCursGlbs(e.clientX,e.clientY);
-    glbVmGlbs8[78+e.button]=1;
-    glbVmGlbs8[83+e.button]=1;
+    if(first){
+      setCursGlbs(n.clientX,n.clientY);
+      glbVmGlbs8[78+n.button]=1;
+      glbVmGlbs8[83+n.button]=1;
+    }
   };
   const canvPtrUp=(e)=>{
     e.preventDefault();
     tchs.delete(e.pointerId);
     // update click/cursorglbs
-    setCursGlbs(e.clientX,e.clientY);
-    glbVmGlbs8[78+e.button]=0;
-    glbVmGlbs8[88+e.button]=1;
+    if(tchs.size===0){
+      setCursGlbs(n.clientX,n.clientY);
+      glbVmGlbs8[78+n.button]=0;
+      glbVmGlbs8[88+n.button]=1;
+    }
   };
   const canvPtrMm=(e)=>{
     e.preventDefault();
