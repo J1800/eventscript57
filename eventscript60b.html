@@ -102,13 +102,13 @@
     red:0.5,green:0.5,blue:0.5,alph:1,source:-1,time:0,page:0,stch:0,
     endch:100,fontsize:0.05,bgRed:0,bgGreen:0,bgBlue:0,bgAlpha:0
 
-  glb64s:
-    +0:dt,+1:scrT,+2:date,+3:cursX,+4:cursY,+5:pitch,
-    +6:roll,+7:yaw,+8:ar,+9:nw,+10:nh,11-63:custom
-
   glb8s:
-    0-25:keyPr(a-z),26-51:keyDwn(a-z),52-77:keyUp(a-z)
-    78-82:mousePr(0-5),83-87:mouseDwn(0-5),88-92:mouseUp(0-5),93-191:custom
+    64-89:keyPr(a-z),90-115:keyDwn(a-z),116-141:keyUp(a-z)
+    142-146:mousePr(0-5),147-151:mouseDwn(0-5),152-156:mouseUp(0-5),157-255:custom
+
+  glb8s (vm instrs):
+      0-25:keyPr(a-z),26-51:keyDwn(a-z),52-77:keyUp(a-z)
+      78-82:mousePr(0-5),83-87:mouseDwn(0-5),88-92:mouseUp(0-5),93-191:custom
   
   functions:
     +0:cos,+1:sin,+2:tan,+3:abs,+4:sqrt,+5:randInt,+6:randFlt
@@ -164,31 +164,31 @@ const setupGlbs=()=>{
   propDfts=[1,-0.5,-0.5,1,1,1,0,0.5,0.5,0.5,1,-1,0,0,0,100,0.05,0.5,0.5,0.5,0];
   // instr precMap for shunting yard
   pm=[
-    5, // +
-    5, // -
-    6, // *
-    6, // /
-    3, // &
-    2, // |
-    7, // ^
-    4, // ==
-    4, // <
-    4, // >
-    4, // <=
-    4, // >=
-    8, // !
-    4, // !=
-    8, // u-
-    1, // ...func0
-    1, // ...func1
-    1, // ...func2
-    1, // ...func3
-    1, // ...func4
-    1, // ...func5
-    1, // ...func6
-    1, // ...func7
-    0  // openBr
-  ]
+  5, // 0 + 
+  5, // 1 -
+  6, // 2 *
+  6, // 3 /
+  6, // 4 %      ← was missing, mod same as * /
+  3, // 5 &
+  2, // 6 |
+  7, // 7 ^
+  4, // 8 ==
+  4, // 9 <
+  4, // 10 >
+  4, // 11 <=
+  4, // 12 >=
+  8, // 13 ! (logical not)
+  4, // 14 !=
+  8, // 15 unary -
+  1, // 16 cos
+  1, // 17 sin
+  1, // 18 tan
+  1, // 19 abs
+  1, // 20 sqrt
+  1, // 21 randInt
+  1, // 22 randFlt
+];
+
   // shunting yard stack, max 256ch ln so max case = 256 opening brackets
   sh=new Uint8Array(256);
   // page-related glbs
@@ -715,7 +715,10 @@ const prsLns=(ln,z,eo,vm,str)=>{
           break;
         case 25: // 'neg'
           // neg is vm instr 15
-          while(pm[sh[y-1]]>pm[15])a8[z++]=sh[--y];
+
+          while(pm[sh[y-1]]>pm[15]){
+            a8[z++]=sh[--y];
+          }
           sh[y++]=15;
           break;
         case 26: // 'not'
@@ -725,7 +728,7 @@ const prsLns=(ln,z,eo,vm,str)=>{
           break;
         case 27: // 'eqeq' (ie '==')
           // eq is vm instr 8
-          while(pm[sh[y-1]]>pm[8])a8[z++]=sh[--y];
+          while(pm[sh[y-1]]>=pm[8])a8[z++]=sh[--y];
           sh[y++]=8;
           break;
         case 28: // 'lessThanOrEq'
@@ -740,13 +743,15 @@ const prsLns=(ln,z,eo,vm,str)=>{
           break;
         case 30: // 'lessThan/greaterThan'
           // next to each other in toks and instr so just push tok-2
-          while(pm[sh[y-1]]>=pm[tok-2])a8[z++]=sh[--y];
+          while(pm[sh[y-1]]>=pm[tok-2]){
+            a8[z++]=sh[--y];
+          }
           sh[y++]=tok-2;
           break;
         case 31: continue; // 'notEqExcl'
         case 32: // 'notEqEq'
           // notEq is vm instr 14
-          while(pm[sh[y-1]]>pm[14])a8[z++]=sh[--y];
+          while(pm[sh[y-1]]>=pm[14])a8[z++]=sh[--y];
           sh[y++]=14;
           break;
         case 33: continue; // 'eq'
@@ -1196,16 +1201,16 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
       case 2: pf[j-2]*=pf[--j]; break; // nos*tos
       case 3: pf[j-2]/=pf[--j]; break; // nos/tos
       case 4: pf[j-2]%=pf[--j]; break; // nos%tos
-      case 5: pf[j-2]=pf[j-2]&&pf[--j]; break; // nos&tos
-      case 6: pf[j-2]=pf[j-2]||pf[--j]; break; // nos|tos
+      case 5: pf[j-2]=pf[j-2]&&pf[j-1];j--; break; // nos&tos
+      case 6: pf[j-2]=pf[j-2]||pf[j-1];j--; break; // nos|tos
       case 7: pf[j-2]**=pf[--j]; break; // nos^tos
-      case 8: pf[j-2]=+(pf[j-2]==pf[--j]); break; // nos==tos
-      case 9: pf[j-2]=+(pf[j-2]<pf[--j]); break; // nos<tos
-      case 10: pf[j-2]=+(pf[j-2]>pf[--j]); break; // nos>tos
-      case 11: pf[j-2]=+(pf[j-2]<=pf[--j]); break; // nos<=tos
-      case 12: pf[j-2]=+(pf[j-2]>=pf[--j]); break; // nos>=tos
-      case 13: pf[j-1]=+!pf[--j]; break; // !tos
-      case 14: pf[j-2]=+(pf[j-2]!=pf[--j]); break; // nos!=tos
+      case 8: pf[j-2]=pf[j-2]==pf[--j]; break; // nos==tos
+      case 9: pf[j-2]=pf[j-2]<pf[--j]; break; // nos<tos
+      case 10: pf[j-2]=pf[j-2]>pf[--j]; break; // nos>tos
+      case 11: pf[j-2]=pf[j-2]<=pf[--j]; break; // nos<=tos
+      case 12: pf[j-2]=pf[j-2]>=pf[--j]; break; // nos>=tos
+      case 13: pf[j-1]=!pf[--j]; break; // !tos
+      case 14: pf[j-2]=pf[j-2]!=pf[--j]; break; // nos!=tos
       case 15: pf[j-1]=-pf[j-1]; break; // -tos
       case 16: pf[j-1]=Math.cos(pf[j-1]); break; // cos(tos)
       case 17: pf[j-1]=Math.sin(pf[j-1]); break; // sin(tos)
@@ -1238,6 +1243,7 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
         pf[j++]=glbs64[v8[++i]];
         break;
       case 28: // r-Glb-8 (tar:+1)
+        //console.log(v8[i+1]+'  '+glbs8[v8[++i]]);
         pf[j++]=glbs8[v8[++i]];
         break;
       case 29: // wProp (eo:+1,idx:+2)
@@ -1623,6 +1629,9 @@ const onLoad=()=>{
     codeWriter.style.cursor=n===2?null:'default';
     consInp.style.cursor=n===3?null:'default';
     consInp.value='>';
+    if(n===1){
+      document.activeElement.blur();
+    }
     if(n===3){
       consInp.selectionStart=consInp.selectionEnd=consInp.value.length;
     }
@@ -1686,9 +1695,9 @@ const onLoad=()=>{
     tchs.set(e.pointerId,{x:e.clientX,y:e.clientY});
     // update click/cursorglbs
     if(first){
-      setCursGlbs(n.clientX,n.clientY);
-      glbVmGlbs8[78+n.button]=1;
-      glbVmGlbs8[83+n.button]=1;
+      setCursGlbs(e.clientX,e.clientY);
+      glbVmGlbs8[78+e.button]=1;
+      glbVmGlbs8[83+e.button]=1;
     }
   };
   const canvPtrUp=(e)=>{
@@ -1696,8 +1705,8 @@ const onLoad=()=>{
     tchs.delete(e.pointerId);
     // update click/cursorglbs
     if(tchs.size===0){
-      glbVmGlbs8[78+n.button]=0;
-      glbVmGlbs8[88+n.button]=1;
+      glbVmGlbs8[78+e.button]=0;
+      glbVmGlbs8[88+e.button]=1;
     }
   };
   const canvPtrMm=(e)=>{
@@ -1806,6 +1815,9 @@ const readGlbVm=()=>{
   // sub scrs ofc use bgColor
   read(glbVm,ru,rcx,rcy,ox,oy,os);
   animId=requestAnimationFrame(readGlbVm);
+  // wipe key/mouse down/up glbs
+  glbVmGlbs8.fill(0,26,78);
+  glbVmGlbs8.fill(0,83,93);
 };
 
 // refresh display glbs eg on any resize
