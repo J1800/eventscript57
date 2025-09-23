@@ -1698,10 +1698,11 @@ const onLoad=()=>{
   };
   const canvPtrMm=(e)=>{
     e.preventDefault();
-    // update click/cursorglbs
-    setCursGlbs(e.clientX,e.clientY);
     // return if not yet pressed
-    if(!tchs.has(e.pointerId))return; // aka not yet pressed
+    if(!tchs.has(e.pointerId)){
+      setCursGlbs(e.clientX,e.clientY);
+      return;
+    }
     // return if frozen
     if(freezeFlg)return;
     const oldX=tchs.get(e.pointerId).x,oldY=tchs.get(e.pointerId).y;
@@ -1724,7 +1725,10 @@ const onLoad=()=>{
     ox=ox*ds+(intlAvgX-cx)*(1-ds);
     oy=oy*ds+(intlAvgY-cy)*(1-ds);
     // 3: set new vals for other/future move calls
-    tchs.get(e.pointerId).x=e.clientX; tchs.get(e.pointerId).y=e.clientY;
+    tchs.get(e.pointerId).x=e.clientX;
+    tchs.get(e.pointerId).y=e.clientY;
+    // call setCurs on avg
+    setCursGlbs(newAvgX,newAvgY);
   };
   // mousewheel->OS/OX/OY
   const canvOS=(e)=>{
