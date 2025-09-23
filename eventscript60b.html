@@ -1755,10 +1755,10 @@ const onLoad=()=>{
   document.addEventListener('keyup',glbKeyUp);
   codeWriter.addEventListener('keydown',cwKd);
   codeWriter.addEventListener('input',e=>glbCpl());
-  canv.addEventListener('pointerdown',canvPtrDwn);
-  canv.addEventListener('pointerup',canvPtrUp);
-  canv.addEventListener('pointercancel',canvPtrUp);
-  canv.addEventListener('pointermove',canvPtrMm);
+  canv.addEventListener('pointerdown',canvPtrDwn,{passive:false});
+  canv.addEventListener('pointerup',canvPtrUp,{passive:false});
+  canv.addEventListener('pointercancel',canvPtrUp,{passive:false});
+  canv.addEventListener('pointermove',canvPtrMm,{passive:false});
   canv.addEventListener('wheel',canvOS);
   consInp.addEventListener('keydown',consInpKd);
   consInp.addEventListener('input',consInpInp);
