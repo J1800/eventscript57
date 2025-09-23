@@ -121,7 +121,7 @@ let buffInUse,tMap,bScr,lnStChs,lnEnChs,lnDpts,lnPars,lnMCnts,lnMIdxs,lnJmps;
 let lnMap,bStk,buff,a8,a32,dfa,maxE,propDfts,pm,sh,selectionState;
 let ctx,pd,rw,rh,ru,cx,cy,rcx,rcy,pgT,animId,ox,oy,os,tchs,locFiles;
 let imgBckt,sndBckt,vidBckt,blankVm,glbVm,recursiveEoCnt,qMap,mainFlg;
-let glbVmGlbs64,glbVmGlbs8,lblsMap,revLblsMap;
+let glbVmGlbs64,glbVmGlbs8,lblsMap,revLblsMap,freezeFlg;
 
 // sets glbs above, runs once onload
 const setupGlbs=()=>{
@@ -227,6 +227,8 @@ const setupGlbs=()=>{
   lblsMap={};
   revLblsMap={};
   setupLbs();
+  // freezeFlg glb used to disable pan/zoom onPtr
+  freezeFlg=false;
 };
 
 // manually fills big DFA used by cpl
@@ -455,9 +457,6 @@ const setupLbs=()=>{
   }
 };
 
-
-
-
 // compiler, str->vm
 const cpl=(str)=>{
   buffInUse=true; // flg prevents async a8 access/interference
@@ -549,7 +548,11 @@ const mapLns=(len)=>{
   let dpt=1,chCnt=0;
   for(let i=0;i<len;i++){
     while(bScr[i]===0)dpt++,i++; // count spaces
-    while(bScr[i]!==1&&i<len)chCnt++,i++; // count chars
+     // count chs
+    while(bScr[i]!==1&&i<len){
+      chCnt++;
+      i++;
+    }
     // at this point we're at lnBrk(1) or scr end, so push ln vals
     lnStChs[z]=i-chCnt; // stCh
     lnEnChs[z]=i; // enCh
@@ -861,7 +864,7 @@ const prsLns=(ln,z,eo,vm,str)=>{
     switch(pfTy){
       case 0: z+=pushChk(cLn,z,eo,vm,str);break; // chk
       case 1: z+=pushX(eo,xTar,z,true);break; // locWr
-      case 2: z+=pushG(xTar,z,true);break; // gWr
+      case 2: z+=pushG(eo,xTar,z,true);break; // gWr
       case 3: z+=pushX(eTar,xTar,z,true);break; // extWr
     }
   }
@@ -1259,7 +1262,7 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
         }
         break;
       case 37: // TL (+1:eo,+2:cnt,+3/4:bigJmpTar,...32IntDurs,...16bJmpTars)
-        const tlTime=v64[props+((v8[i+1])<<6)+12]*1000; // sec to ms
+        const tlTime=props[(v8[i+1]*64)+12]*1000; // sec to ms
         const tlCnt=v8[i+2];
         const dursStart=i+5;
         const jmpsStart=dursStart+tlCnt*4;
@@ -1660,18 +1663,43 @@ const onLoad=()=>{
     else if(x>=cx&&x<=cx+cw&&y>=cy&&y<=cy+ch&&selectionState!==3)
       setSelectionState(3);
   };
+  // sets cursX/cursY 64b glbs in glbVM, called by events
+  const setCursGlbs=(x,y)=>{
+    // render pxs from center
+    const px=(x-cx)*pd-ox;
+    const py=(y-cy)*pd-oy;
+    // compositional dist from center in ru units
+    const cursX=(px/(ru/2))/os;
+    const cursY=(py/(ru/2))/os;
+    glbVmGlbs64[3]=cursX;
+    glbVmGlbs64[4]=cursY;
+  };
   // 3 funcs, canvasDrag->glbVm OX/OY
   const canvPtrDwn=(e)=>{
     e.preventDefault();
+    // set tch for running pointerMov event
     tchs.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    // update click/cursorglbs
+    setCursGlbs(e.clientX,e.clientY);
+    glbVmGlbs8[78+e.button]=1;
+    glbVmGlbs8[83+e.button]=1;
   };
   const canvPtrUp=(e)=>{
     e.preventDefault();
     tchs.delete(e.pointerId);
+    // update click/cursorglbs
+    setCursGlbs(e.clientX,e.clientY);
+    glbVmGlbs8[78+e.button]=0;
+    glbVmGlbs8[88+e.button]=1;
   };
   const canvPtrMm=(e)=>{
     e.preventDefault();
+    // update click/cursorglbs
+    setCursGlbs(e.clientX,e.clientY);
+    // return if not yet pressed
     if(!tchs.has(e.pointerId))return; // aka not yet pressed
+    // return if frozen
+    if(freezeFlg)return;
     const oldX=tchs.get(e.pointerId).x,oldY=tchs.get(e.pointerId).y;
     const newX=e.clientX,newY=e.clientY;
     // 1: pan
@@ -1696,6 +1724,7 @@ const onLoad=()=>{
   };
   // mousewheel->OS/OX/OY
   const canvOS=(e)=>{
+    if(freezeFlg)return;
     const edy=e.deltaY;
     if(e.ctrlKey){oy+=(0.2*edy);return;}
     else if(e.altKey){ox+=(0.2*edy);return;}
@@ -2168,6 +2197,12 @@ const consCmd=(str)=>{
   const raw=()=>{
 
   };
+  const freeze=()=>{
+    freezeFlg=true;
+  };
+  const unfreeze=()=>{
+    freezeFlg=false;
+  };
   let z=0;
   for(z=0;z<str.length;z++){if(str[z]===' ')break;}
   const cmdStr=str.substring(0,z).toUpperCase();
@@ -2191,6 +2226,8 @@ const consCmd=(str)=>{
     case '>OPS': dumpOps(); break; // dump OPS (aka friendly, readable vers of glbVm)
     case '>LABELS': labels(); break; // replaces x0, x1, etc, with labels
     case '>RAW': raw(); break; // reverses labels
+    case '>FREEZE': freeze(); break; // disable pan/zoom on pointer
+    case '>UNFREEZE': unfreeze(); break; // re-enable pan/zoom on pointer
   }
 };
 
