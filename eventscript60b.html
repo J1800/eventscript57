@@ -1696,7 +1696,6 @@ const onLoad=()=>{
     tchs.delete(e.pointerId);
     // update click/cursorglbs
     if(tchs.size===0){
-      setCursGlbs(n.clientX,n.clientY);
       glbVmGlbs8[78+n.button]=0;
       glbVmGlbs8[88+n.button]=1;
     }
@@ -1778,13 +1777,13 @@ const onLoad=()=>{
   consInp.addEventListener('focus',consInpFocus);
   consInp.addEventListener('blur',consInpFocus);
   cOut(' ');
-  cOut('      ████████');
-  cOut('      ██████████');
-  cOut('   ███████');
-  cOut('   ███████');
-  cOut('   ███████');
-  cOut('██████████');
-  cOut(' ████████');
+  cOut('      ███████');
+  cOut('      █████████');
+  cOut('   ██████');
+  cOut('   ██████');
+  cOut('   ██████');
+  cOut('█████████');
+  cOut(' ███████');
   cOut(' ');
   cOut('Eventscript v1. Try commands HELP,LICENSE,MANUAL');
   window.addEventListener("deviceorientation",setOrientation);
