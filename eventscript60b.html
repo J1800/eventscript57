@@ -1707,8 +1707,6 @@ const onLoad=()=>{
       setCursGlbs(e.clientX,e.clientY);
       return;
     }
-    // return if frozen
-    if(freezeFlg)return;
     const oldX=tchs.get(e.pointerId).x,oldY=tchs.get(e.pointerId).y;
     const newX=e.clientX,newY=e.clientY;
     // 1: pan
@@ -1716,6 +1714,10 @@ const onLoad=()=>{
     const intlAvgX=sumX/tchs.size,intlAvgY=sumY/tchs.size;
     sumX-=oldX; sumY-=oldY; sumX+=newX; sumY+=newY;
     const newAvgX=sumX/tchs.size,newAvgY=sumY/tchs.size;
+    // call setCurs on avg
+    setCursGlbs(newAvgX,newAvgY);
+    // return if frozen
+    if(freezeFlg)return;
     ox+=(newAvgX-intlAvgX)*pd; oy+=(newAvgY-intlAvgY)*pd;
     // 2: scale 
     let distSum=0;
@@ -1731,8 +1733,7 @@ const onLoad=()=>{
     // 3: set new vals for other/future move calls
     tchs.get(e.pointerId).x=e.clientX;
     tchs.get(e.pointerId).y=e.clientY;
-    // call setCurs on avg
-    setCursGlbs(newAvgX,newAvgY);
+    
   };
   // mousewheel->OS/OX/OY
   const canvOS=(e)=>{
