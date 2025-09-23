@@ -1714,8 +1714,10 @@ const onLoad=()=>{
     const intlAvgX=sumX/tchs.size,intlAvgY=sumY/tchs.size;
     sumX-=oldX; sumY-=oldY; sumX+=newX; sumY+=newY;
     const newAvgX=sumX/tchs.size,newAvgY=sumY/tchs.size;
-    // call setCurs on avg
-    setCursGlbs(newAvgX,newAvgY);
+    // call setCurs on avg if one
+    if(tchs.size===1){
+      setCursGlbs(newAvgX,newAvgY);
+    }
     // return if frozen
     if(freezeFlg)return;
     ox+=(newAvgX-intlAvgX)*pd; oy+=(newAvgY-intlAvgY)*pd;
