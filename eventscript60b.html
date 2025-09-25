@@ -1440,8 +1440,8 @@ const readSrcX=(vm,srcNum,tar)=>{
   if(srcNum<0||srcNum>vm.length-1-1)return 0;
   const ele=vm[1+srcNum];
   if(ele instanceof HTMLImageElement){
-    const w=ele.imageWidth
-    const h=ele.imageHeight;
+    const w=ele.naturalWidth
+    const h=ele.naturalHeight;
     switch(tar){
       case 0: return w;
       case 1: return h;
@@ -1605,21 +1605,26 @@ const onLoad=()=>{
     }
   };
   // maintains indent on cw new ln, nice QOL feature
-  const cwKd=(e)=>{
-    if(e.key==='Enter'){
-      e.preventDefault();
+  let entPos=0;
+const cwKd=(e)=>{
+  if(e.key==='Enter'){
+    entPos=codeWriter.selectionStart; // before \n
+    const h=()=>{
       const cw=codeWriter,cwV=cw.value;
-      const s=codeWriter.selectionStart;
-      const lS=cwV.lastIndexOf('\n',s-1)+1;
+      const lS=cwV.lastIndexOf('\n',entPos-1)+1;
       let i=lS,c=0;
       while(cwV[i]===' '){c++;i++;}
-      const pad='\n'+Array(c+1).join(' ');
-      codeWriter.value=cwV.substring(0,s)+pad+cwV.substring(cw.selectionEnd);
-      codeWriter.selectionStart=cw.selectionEnd=s+pad.length;
-      // cw.scrollLeft=0,cw.scrollTop+=18;
+      const pad=' '.repeat(c);
+      const s=entPos+1; // after native \n
+      cw.value=cwV.slice(0,s)+pad+cwV.slice(s);
+      cw.selectionStart=cw.selectionEnd=s+pad.length;
       glbCpl();
-    }
-  };
+      cw.removeEventListener('input',h);
+    };
+    codeWriter.addEventListener('input',h);
+  }
+};
+
   // webpage selected area, called by mouse/touch, or tabkey:
   const setSelectionState=n=>{
     selectionState=n;
