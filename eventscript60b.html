@@ -1112,7 +1112,7 @@ const prsSrcs=(ln,vm,str)=>{
         case 1: // txt, path
           const txtIdx=vm.push('')-1;
           fetch(locFiles[srcStr]?locFiles[srcStr]:srcStr)
-            .then(r=>r.text())
+            .then(r=>r.ok?r.text():'')
             .then(t=>vm[txtIdx]=t)
             .catch(()=>{}); // blank, but removes unhndled promise cons err
           break;
@@ -1606,25 +1606,24 @@ const onLoad=()=>{
   };
   // maintains indent on cw new ln, nice QOL feature
   let entPos=0;
-const cwKd=(e)=>{
-  if(e.key==='Enter'){
-    entPos=codeWriter.selectionStart; // before \n
-    const h=()=>{
-      const cw=codeWriter,cwV=cw.value;
-      const lS=cwV.lastIndexOf('\n',entPos-1)+1;
-      let i=lS,c=0;
-      while(cwV[i]===' '){c++;i++;}
-      const pad=' '.repeat(c);
-      const s=entPos+1; // after native \n
-      cw.value=cwV.slice(0,s)+pad+cwV.slice(s);
-      cw.selectionStart=cw.selectionEnd=s+pad.length;
-      glbCpl();
-      cw.removeEventListener('input',h);
-    };
-    codeWriter.addEventListener('input',h);
-  }
-};
-
+  const cwKd=(e)=>{
+    if(e.key==='Enter'){
+      entPos=codeWriter.selectionStart; // before \n
+      const h=()=>{
+        const cw=codeWriter,cwV=cw.value;
+        const lS=cwV.lastIndexOf('\n',entPos-1)+1;
+        let i=lS,c=0;
+        while(cwV[i]===' '){c++;i++;}
+        const pad=' '.repeat(c);
+        const s=entPos+1; // after native \n
+        cw.value=cwV.slice(0,s)+pad+cwV.slice(s);
+        cw.selectionStart=cw.selectionEnd=s+pad.length;
+        glbCpl();
+        cw.removeEventListener('input',h);
+      };
+      codeWriter.addEventListener('input',h);
+    }
+  };
   // webpage selected area, called by mouse/touch, or tabkey:
   const setSelectionState=n=>{
     selectionState=n;
