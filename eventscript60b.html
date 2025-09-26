@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta property="og:title" content="eventscript">
-  <meta property="og:description" content="Universal compositional content programming language for memes, documentaries, games.">
+  <meta property="og:description" content="Universal content-scripting-language for memes, documentaries, games.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://j1800.github.io/eventscript57/">
   <meta property="og:image" content="https://j1800.github.io/eventscript57/icon600.png">
@@ -1268,7 +1268,8 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
       case 36: // PGS (+1:eo,+2:cnt,+3/4:bigJmpTar,...16bJmpTars)
         const pg=props[(v8[i+1]*64)+13];
         const pgCnt=v8[i+2];
-        if(pg>0&&pg<pgCnt){
+        
+        if(pg>=0&&pg<pgCnt){
           const tarIdx=i+5+(pg*2);
           i=v8[tarIdx]*256+v8[tarIdx+1]-1;
         }else{
