@@ -132,7 +132,7 @@ let buffInUse,tMap,bScr,lnStChs,lnEnChs,lnDpts,lnPars,lnMCnts,lnMIdxs,lnJmps;
 let lnMap,bStk,buff,a8,a32,dfa,maxE,propDfts,pm,sh,selectionState;
 let ctx,pd,rw,rh,ru,cx,cy,rcx,rcy,pgT,animId,ox,oy,os,tchs,locFiles;
 let imgBckt,sndBckt,vidBckt,blankVm,glbVm,recursiveEoCnt,qMap,mainFlg;
-let glbVmGlbs64,glbVmGlbs8,lblsMap,revLblsMap,freezeFlg;
+let glbVmGlbs64,glbVmGlbs8,lblsMap,revLblsMap,freezeFlg,lblsModeFlg;
 
 // sets glbs above, runs once onload
 const setupGlbs=()=>{
@@ -240,6 +240,8 @@ const setupGlbs=()=>{
   setupLbs();
   // freezeFlg glb used to disable pan/zoom onPtr
   freezeFlg=false;
+  // lbls mode flag, to write up in manual
+  lblsModeFlg=false;
 };
 
 // manually fills big DFA used by cpl
@@ -441,6 +443,7 @@ const setupLbs=()=>{
     lblsMap['g'+(64+78+i)]='mouse'+i;
     revLblsMap['mouse'+i]='g'+(64+78+i);
   }
+
   const letters='abcdefghijklmnopqrstuvwxyz';
   for(let i=25;i>=0;i--){
     const c=letters[i].toUpperCase();
@@ -451,22 +454,60 @@ const setupLbs=()=>{
     lblsMap['g'+(64+i)]='key'+c;
     revLblsMap['key'+c]='g'+(64+i);
   }
+
   const g64sLabels=['dt','scrT','date','cursX','cursY','pitch','roll','yaw','ar','nw','nh'];
   for(let i=g64sLabels.length-1;i>=0;i--){
     lblsMap['g'+i]=g64sLabels[i];
     revLblsMap[g64sLabels[i]]='g'+i;
   }
+
   const fLabels=['cos','sin','tan','abs','sqrt','randInt','randFlt'];
   for(let i=fLabels.length-1;i>=0;i--){
     lblsMap['f'+i]=fLabels[i];
     revLblsMap[fLabels[i]]='f'+i;
   }
+
   const xLabels=['scale','left','top','width','height','opacity','rotate','red','green','blue','alph','source','time','page','stch','endch','fontsize','bgRed','bgGreen','bgBlue','bgAlpha'];
   for(let i=xLabels.length-1;i>=0;i--){
     lblsMap['x'+i]=xLabels[i];
     revLblsMap[xLabels[i]]='x'+i;
   }
+
+  // Fill x0-x63 gaps with propN
+  for(let i=0;i<=63;i++){
+    if(!lblsMap['x'+i]){
+      lblsMap['x'+i]='prop'+i;
+      revLblsMap['prop'+i]='x'+i;
+    }
+  }
+
+  // Fill x64-x319 gaps with srcN
+  for(let i=64;i<=319;i++){
+    if(!lblsMap['x'+i]){
+      lblsMap['x'+i]='src'+(i-64);
+      revLblsMap['src'+(i-64)]='x'+i;
+    }
+  }
+
+  // Fill g0-g255 gaps with glbN
+  for(let i=0;i<=255;i++){
+    if(!lblsMap['g'+i]){
+      lblsMap['g'+i]='glbs'+i;
+      revLblsMap['glbs'+i]='g'+i;
+    }
+  }
+
+  // Precompute sorted keys for replacement (longest first)
+  lblsMap=Object.fromEntries(
+    Object.keys(lblsMap).sort((a,b)=>b.length-a.length).map(k=>[k,lblsMap[k]])
+  );
+  revLblsMap=Object.fromEntries(
+    Object.keys(revLblsMap).sort((a,b)=>b.length-a.length).map(k=>[k,revLblsMap[k]])
+  );
+
 };
+
+
 
 // compiler, str->vm
 const cpl=(str)=>{
@@ -523,7 +564,13 @@ const cpl=(str)=>{
 };
 
 // compiles the global scr
-const glbCpl=()=>{
+const glbCpl=(force=false)=>{
+  const startTime=performance.now();
+  // if lblsModeFlg on, requires force (aka from cons cmd call)
+  if(lblsModeFlg&&!force)return;
+  // if lblsModeFlg + forced, call RAW before continuing
+  const str=(lblsModeFlg&&force)?raw(codeWriter.value):codeWriter.value;
+  const startTimePostLabels=performance.now();
   // reset cap on nested eos (checked at prsSrcs)
   recursiveEoCnt=0;
   // reset qMap (maps quote locations during script friendly-code export)
@@ -532,7 +579,7 @@ const glbCpl=()=>{
   mainFlg=true;
   // save html elements from old script into buckets
   recycleEles(glbVm);
-  glbVm=cpl(codeWriter.value);
+  glbVm=cpl(str);
   const meta=new Uint8Array(glbVm[0],0,2);
   const instrEnd=meta[0]<<8;
   const eoCnt=meta[1];
@@ -543,7 +590,11 @@ const glbCpl=()=>{
   z+=64*8;
   glbVmGlbs8=new Uint8Array(glbVm[0],z,192);
   mainFlg=false;
-  location.hash=prepExp(codeWriter.value);
+  location.hash=prepExp(str);
+  if(force){
+    cOut('lbls:'+(startTimePostLabels-startTime).toFixed(1)+'ms');
+    cOut('cpl:'+(performance.now()-startTimePostLabels).toFixed(1)+'ms');
+  };
 };
 
 // reads through bScr while < len, fills lnStChs,lnEnChs,lnMCnts,lnMIdxs,lnMap
@@ -2223,21 +2274,29 @@ const consCmd=(str)=>{
     }
     cOut(ops.join(','));
   };
-  const labels=()=>{
+  const labels=()=>{ // will also need a RAW function
     let txt=codeWriter.value;
     for(const k in lblsMap){
       txt=txt.replaceAll(k,lblsMap[k]);
     }
     codeWriter.value=txt;
-  };
-  const raw=()=>{
-
+    lblsModeFlg=true;
+    cOut('entering labels mode, use CPL to compile');
   };
   const freeze=()=>{
     freezeFlg=true;
   };
   const unfreeze=()=>{
     freezeFlg=false;
+  };
+  const unLabels=()=>{
+    codeWriter.value=raw(codeWriter.value);
+    lblsModeFlg=false;
+    glbCpl();
+    cOut('exiting labels mode, compile back to on keypress');
+  };
+  const manualCpl=()=>{
+    glbCpl(true);
   };
   let z=0;
   for(z=0;z<str.length;z++){if(str[z]===' ')break;}
@@ -2260,13 +2319,26 @@ const consCmd=(str)=>{
     case '>URL': expUrl(); break; // same as >EXP but url and ? in front
     case '>BYTES': dumpBytes(); break; // dumps raw bytes of glbVm to console
     case '>OPS': dumpOps(); break; // dump OPS (aka friendly, readable vers of glbVm)
-    case '>LABELS': labels(); break; // replaces x0, x1, etc, with labels
-    case '>RAW': raw(); break; // reverses labels
+    case '>LABELS': 
+      // replaces x0, x1, etc, with labels
+      // also enables lblsMode, so manual CPL + mass replace of label strs with raw es
+      labels();
+      break; 
+    case '>RAW': unLabels(); break; // reverses labels
     case '>FREEZE': freeze(); break; // disable pan/zoom on pointer
     case '>UNFREEZE': unfreeze(); break; // re-enable pan/zoom on pointer
+    case '>CPL': manualCpl(); break; // manual compile aka in labels mode
   }
 };
 
+// converts LABELS back to raw es, glb as used by console CPL cmd + glbCpl
+const raw=(str)=>{
+  let txt=str;
+  for(const k in revLblsMap){
+    txt=txt.replaceAll(k,revLblsMap[k]);
+  }
+  return txt;
+};
 
 
 </script></body>
