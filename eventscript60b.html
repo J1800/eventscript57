@@ -102,6 +102,9 @@
     red:0.5,green:0.5,blue:0.5,alph:1,source:-1,time:0,page:0,stch:0,
     endch:100,fontsize:0.05,bgRed:0,bgGreen:0,bgBlue:0,bgAlpha:0
 
+  glb64s
+   0:dt,1:scrT,2:d,3:cursX,4:cursY,5:pitch,6:roll,7:yaw,8:ar,9:nw,10:nh:11-63:custom
+
   glb8s:
     64-89:keyPr(a-z),90-115:keyDwn(a-z),116-141:keyUp(a-z)
     142-146:mousePr(0-5),147-151:mouseDwn(0-5),152-156:mouseUp(0-5),157-255:custom
@@ -164,30 +167,30 @@ const setupGlbs=()=>{
   propDfts=[1,-0.5,-0.5,1,1,1,0,0.5,0.5,0.5,1,-1,0,0,0,100,0.05,0.5,0.5,0.5,0];
   // instr precMap for shunting yard
   pm=[
-  5, // 0 + 
-  5, // 1 -
-  6, // 2 *
-  6, // 3 /
-  6, // 4 %      ← was missing, mod same as * /
-  3, // 5 &
-  2, // 6 |
-  7, // 7 ^
-  4, // 8 ==
-  4, // 9 <
-  4, // 10 >
-  4, // 11 <=
-  4, // 12 >=
-  8, // 13 ! (logical not)
-  4, // 14 !=
-  8, // 15 unary -
-  1, // 16 cos
-  1, // 17 sin
-  1, // 18 tan
-  1, // 19 abs
-  1, // 20 sqrt
-  1, // 21 randInt
-  1, // 22 randFlt
-];
+    5, // 0 + 
+    5, // 1 -
+    6, // 2 *
+    6, // 3 /
+    6, // 4 %      ← was missing, mod same as * /
+    3, // 5 &
+    2, // 6 |
+    7, // 7 ^
+    4, // 8 ==
+    4, // 9 <
+    4, // 10 >
+    4, // 11 <=
+    4, // 12 >=
+    8, // 13 ! (logical not)
+    4, // 14 !=
+    8, // 15 unary -
+    1, // 16 cos
+    1, // 17 sin
+    1, // 18 tan
+    1, // 19 abs
+    1, // 20 sqrt
+    1, // 21 randInt
+    1, // 22 randFlt
+  ];
 
   // shunting yard stack, max 256ch ln so max case = 256 opening brackets
   sh=new Uint8Array(256);
@@ -1150,7 +1153,8 @@ const prsSrcs=(ln,vm,str)=>{
               }else{
                 vm[scrIdx]=cpl(t);
               }
-          });
+            })
+            .catch(()=>{}); // blank, but removes unhndled promise cons err
           break;
         case 5: // inline txt
           vm.push(srcStr);
@@ -1243,7 +1247,6 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
         pf[j++]=glbs64[v8[++i]];
         break;
       case 28: // r-Glb-8 (tar:+1)
-        //console.log(v8[i+1]+'  '+glbs8[v8[++i]]);
         pf[j++]=glbs8[v8[++i]];
         break;
       case 29: // wProp (eo:+1,idx:+2)
@@ -1314,9 +1317,12 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
   pf[x++]=vmUPx*vmOS; // rend uPx
   pf[x++]=vmCXPx+vmOX; // rend cxPx
   pf[x++]=vmCYPx+vmOY; // rend cyPx
+  // so if ret before code below, 0,11,255,255 doesnt get altereed into 0,0,255,255
+  // has to be inner scr related rite but how ..
   ctx.save();
   // next, lp through drwStk
-  for(i=0;i<y;i++){
+
+  for(let i=0;i<y;i++){
     const eo=drwStk[i];
     // check for drop instr
     if(eo===255){
@@ -1411,13 +1417,7 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
     }
   }
   // final pop of base struct
-  x-=3;
   ctx.restore();
-  // counter drwStk overflow by popping anything else
-  while(x>0){
-    x-=3;
-    ctx.restore();
-  }
   // pause any vid/aud elements not called on the frame, and reset .called
   for(let i=1;i<vm.length;i++){
     const ele=vm[i];
@@ -1490,19 +1490,19 @@ const readSrcX=(vm,srcNum,tar)=>{
       default: return 0;
     }
   }else if(Array.isArray(ele)){
-    const meta=new Uint8Array(ele,0,2);
+    const buff=ele[0];
+    const meta=new Uint8Array(buff,0,2);
     const instrEnd=meta[0]<<8;
     const eoCnt=meta[1];
-    const v8=new Uint8Array(ele,0,instrEnd);
+    const v8=new Uint8Array(buff,0,instrEnd);
     let y=instrEnd; // iterator for declaring views
-    const pf=new Float64Array(ele,y,64); y+=64*8;
-    const props=new Float64Array(ele,y,eoCnt*64); y+=eoCnt*64*8;
-    const glbs64=new Float64Array(ele,y,64); y+=64*8;
-    const glbs8=new Uint8Array(ele,y,192); y+=192;
+    const pf=new Float64Array(buff,y,64); y+=64*8;
+    const props=new Float64Array(buff,y,eoCnt*64); y+=eoCnt*64*8;
+    const glbs64=new Float64Array(buff,y,64); y+=64*8;
+    const glbs8=new Uint8Array(buff,y,192); y+=192;
     if(tar>0){
       if(tar<64)return glbs64[tar];
-      else if(tar<320)return glbs8[tar-64];
-      else return 0;
+      else return glbs8[tar-64];
     }else{
       return 0;
     }
@@ -1510,6 +1510,7 @@ const readSrcX=(vm,srcNum,tar)=>{
 };
 
 const writeSrcX=(vm,srcNum,tar,val)=>{
+
   if(srcNum<0||srcNum>vm.length-1-1)return;
   const ele=vm[1+srcNum];
   if(ele instanceof HTMLImageElement){
@@ -1534,18 +1535,21 @@ const writeSrcX=(vm,srcNum,tar,val)=>{
       case 13: ele.loop=!!val; break;
     }
   }else if(Array.isArray(ele)){
-    const meta=new Uint8Array(ele,0,2);
+    const buff=ele[0];
+    const meta=new Uint8Array(buff,0,2);
     const instrEnd=meta[0]<<8;
     const eoCnt=meta[1];
-    const v8=new Uint8Array(ele,0,instrEnd);
+    const v8=new Uint8Array(buff,0,instrEnd);
     let y=instrEnd; // iterator for declaring views
-    const pf=new Float64Array(ele,y,64); y+=64*8;
-    const props=new Float64Array(ele,y,eoCnt*64); y+=eoCnt*64*8;
-    const glbs64=new Float64Array(ele,y,64); y+=64*8;
-    const glbs8=new Uint8Array(ele,y,192); y+=192;
-    if(tar>0){
-      if(tar<64)glbs64[tar]=val;
-      else if(tar<320)glbs8[tar-64]=val;
+    const pf=new Float64Array(buff,y,64); y+=64*8;
+    const props=new Float64Array(buff,y,eoCnt*64); y+=eoCnt*64*8;
+    const glbs64=new Float64Array(buff,y,64); y+=64*8;
+    const glbs8=new Uint8Array(buff,y,192);
+    if(tar>=0){
+      if(tar<64){
+        glbs64[tar]=val;
+      }
+      else glbs8[tar-64]=val;
     }
   }
 };
@@ -1802,7 +1806,7 @@ const onLoad=()=>{
   cOut('█████████');
   cOut(' ███████');
   cOut(' ');
-  cOut('Eventscript v1. Try commands HELP,LICENSE,MANUAL');
+  cOut('Eventscript v1. Will soon add commands like HELP,LICENSE,MANUAL...');
   window.addEventListener("deviceorientation",setOrientation);
   animId=requestAnimationFrame(readGlbVm);
 };
