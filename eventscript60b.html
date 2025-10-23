@@ -1,39 +1,39 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta property="og:title" content="eventscript">
+  <meta property="og:title" content="eventscript v0">
   <meta property="og:description" content="Universal content-scripting-language for memes, documentaries, games.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://j1800.github.io/eventscript57/">
-  <meta property="og:image" content="https://j1800.github.io/eventscript57/icon600.png">
+  <meta property="og:url" content="https://www.eventscript.org">
+  <meta property="og:image" content="https://www.eventscript.org/icon600.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="600">
   <meta property="og:image:height" content="600">
   <meta charset="UTF-8">
-  <title>EventScript60</title>
+  <title>EventScript v0</title>
   <!-- icons (16 is solid, 32 has lines, rest scaled from the 32) -->
   <!-- 180 used for iOs pwa, 192 for android -->
-  <link rel="icon" type="image/png" href="icon16.png" sizes="16x16">
-  <link rel="icon" type="image/png" href="icon32.png" sizes="32x32">
-  <link rel="icon" type="image/png" href="icon64.png" sizes="64x64">
-  <link rel="apple-touch-icon" sizes="180x180" href="icon180.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="icon192.png">
+  <link rel="icon" type="image/png" href="/icon16.png" sizes="16x16">
+  <link rel="icon" type="image/png" href="/icon32.png" sizes="32x32">
+  <link rel="icon" type="image/png" href="/icon64.png" sizes="64x64">
+  <link rel="apple-touch-icon" sizes="180x180" href="/icon180.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icon192.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="EventScript60">
+  <meta name="apple-mobile-web-app-title" content="EventScript v0">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no">
   <!-- setting the base href removes the special case of a blank string fetch req resolving to the html file -->
   <base href="./">
   <style>
-    @font-face{font-family:DOSEGA;src:url('DOSEGA.ttf') format('truetype');}
     html{overscroll-behavior:none}
     body{--r:75;background:black;/**/margin:0;touch-action:none;user-select:none;}
     #canv{background-color:black;outline:none;position:fixed;touch-action:none;user-select:none;}
     #codeWriter{background-color:#000000;border:none;border-radius:0;color:#AAAAAA;font-size:16px;font-family:Menlo,Monaco,monospace;outline:none;position:absolute;resize:none;scrollbar-color:#5a5a5a transparent;white-space:pre}
-    #consInp{background-color:#000000;border:none;/**/border-radius:0;/**/bottom:8px;color:#AAAAAA;font-family:DOSEGA,monospace;font-size:16px;outline:none;position:absolute;right:8px;top:calc(100% - 24px);touch-action:none}
+    #consInp{background-color:#000000;border:none;/**/border-radius:0;/**/bottom:8px;color:#AAAAAA;font-family:monospace;font-size:16px;outline:none;position:absolute;right:8px;top:calc(100% - 24px);touch-action:none}
     #consSelect{bottom:0;position:absolute;right:0;}
     #consoleDiv{background-color:#000000;bottom:32px;color:#AAAAAA;display:flex;flex-direction:column;font-size:14px;justify-content:flex-end;overflow-x:hidden;overflow-y:auto;overscroll-behavior:none;padding:6px;position:absolute;right:8px;scrollbar-color:#4d63b0 transparent;scroll-behavior:smooth;word-wrap:break-word;user-select:none;}
-    .consoleLn{cursor:default;font-family:DOSEGA,monospace;text-align:center;user-select:none;}
+    .consoleLn{cursor:default;font-family:monospace;text-align:center;user-select:none;}
+    .consoleLn:hover{background-color:#6b7dc6;}
     #curtain{position:absolute;background:#00AAAA}
     #cwSelect{position:absolute}
     #workspace{background:#0000AA;bottom:0;position:fixed;right:0;touch-action:none}
@@ -132,7 +132,7 @@ let buffInUse,tMap,bScr,lnStChs,lnEnChs,lnDpts,lnPars,lnMCnts,lnMIdxs,lnJmps;
 let lnMap,bStk,buff,a8,a32,dfa,maxE,propDfts,pm,sh,selectionState;
 let ctx,pd,rw,rh,ru,cx,cy,rcx,rcy,pgT,animId,ox,oy,os,tchs,locFiles;
 let imgBckt,sndBckt,vidBckt,blankVm,glbVm,recursiveEoCnt,qMap,mainFlg;
-let glbVmGlbs64,glbVmGlbs8,lblsMap,revLblsMap,freezeFlg,lblsModeFlg;
+let glbVmGlbs64,glbVmGlbs8,lblsMap,revLblsMap,freezeFlg,lblsModeFlg,eosCalled;
 
 // sets glbs above, runs once onload
 const setupGlbs=()=>{
@@ -171,7 +171,7 @@ const setupGlbs=()=>{
     5, // 1 -
     6, // 2 *
     6, // 3 /
-    6, // 4 %      ← was missing, mod same as * /
+    6, // 4 %
     3, // 5 &
     2, // 6 |
     7, // 7 ^
@@ -221,6 +221,8 @@ const setupGlbs=()=>{
   imgBckt=[];
   sndBckt=[];
   vidBckt=[];
+  // eosCalled used by cpl to not put eo into a drawStk twice
+  eosCalled=new Uint8Array(256);
   // blankVm used for scripts within scripts before they've loaded
   // similar with a blank string being used before the txt is fetched
   blankVm=cpl('');
@@ -504,10 +506,7 @@ const setupLbs=()=>{
   revLblsMap=Object.fromEntries(
     Object.keys(revLblsMap).sort((a,b)=>b.length-a.length).map(k=>[k,revLblsMap[k]])
   );
-
 };
-
-
 
 // compiler, str->vm
 const cpl=(str)=>{
@@ -1312,7 +1311,17 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
         break;
       case 31: glbs64[v8[++i]]=pf[--j]; break; // wr-64glb (idx:+1)
       case 32: glbs8[v8[++i]]=pf[--j]; break; // wr-8glb (idx:+1)
-      case 33: drwStk[y++]=v8[++i]; break; // DRW (+1:eo||drop)
+      case 33:  // DRW (+1:eo||drop)
+        // really needs a seperate cmd for drop
+        // as curr 255 is a wasted if chk
+        case 33:  // DRW (+1:eo||drop)
+          let val=v8[++i];
+          if(val!==255){
+              if(eosCalled[val]) break;
+              eosCalled[val]=1;
+          }
+          drwStk[y++]=val;
+          break;
       case 34: // CHK (+1/2:tar)
         if(pf[--j])i+=2;
         else i=(v8[i+1]*256+v8[i+2])-1;
@@ -1322,7 +1331,6 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
       case 36: // PGS (+1:eo,+2:cnt,+3/4:bigJmpTar,...16bJmpTars)
         const pg=props[(v8[i+1]*64)+13];
         const pgCnt=v8[i+2];
-        
         if(pg>=0&&pg<pgCnt){
           const tarIdx=i+5+(pg*2);
           i=v8[tarIdx]*256+v8[tarIdx+1]-1;
@@ -1356,7 +1364,7 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
       case 38: continue; // NOP
       default:
         cOut('invalid vm instr, should not happen...');
-        cOut('plz fw exact code to Joe@eventscript.org');
+        cOut('please forward the code to Joe@eventscript.org');
         return;
     }
   }
@@ -1479,6 +1487,8 @@ const read=(vm,vmUPx,vmCXPx,vmCYPx,vmOX,vmOY,vmOS)=>{
     }
     ele.called=false;
   }
+  // clear eosCalled for next run
+  eosCalled.fill(0);
 };
 
 const setCtxClr=(r,g,b,a)=>{
@@ -1857,7 +1867,8 @@ const onLoad=()=>{
   cOut('█████████');
   cOut(' ███████');
   cOut(' ');
-  cOut('Eventscript v1. Will soon add commands like HELP,LICENSE,MANUAL...');
+  cOut('Eventscript v0 (prototype)');
+  cOut('Some commands: MANUAL, AUTHOR, LICENSE, TODO');
   window.addEventListener("deviceorientation",setOrientation);
   animId=requestAnimationFrame(readGlbVm);
 };
@@ -2034,10 +2045,10 @@ const consCmd=(str)=>{
     inp.click();
   };
   const screenshot=()=>{
-    const url=canv.toDataURL('image/'+fileType);
+    const url=canv.toDataURL('image/png');
     const ele=document.createElement('a');
     ele.href=url;
-    ele.download='ss.'+fileType;
+    ele.download='ss.png';
     document.body.appendChild(ele);
     ele.click();
     document.body.removeChild(ele);
@@ -2142,7 +2153,6 @@ const consCmd=(str)=>{
 
     cOut(out.join(','));
   };
-
   const dumpOps=()=>{
     const meta=new Uint8Array(glbVm[0],0,2);
     const instrEnd=meta[0]<<8;
@@ -2281,7 +2291,7 @@ const consCmd=(str)=>{
     }
     codeWriter.value=txt;
     lblsModeFlg=true;
-    cOut('entering labels mode, use CPL to compile');
+    cOut('entering labels mode, use CPL to manually compile');
   };
   const freeze=()=>{
     freezeFlg=true;
@@ -2297,6 +2307,18 @@ const consCmd=(str)=>{
   };
   const manualCpl=()=>{
     glbCpl(true);
+  };
+  const manual=()=>{
+    cOut("Not yet written... For the time being, just sharing examples of what it can output. If you have an example loaded, try the command LABELS to get a gist of the design (the lines represent instructions ran each frame, and indenting represents nested contexts, including conditional jumps")
+  };
+  const author=()=>{
+    cOut('Joe@eventscript.org');
+  };
+  const license=()=>{
+    cOut("I'm planning a completely free and open license for community use, then a small cut from large-scale commercial content aggregation platforms, e.g. from a YouTube-style website that utilized scripts. If you have suggestions about this, you can email Joe@eventscript.org");
+  };
+  const todo=()=>{
+    cOut('www.eventscript.org/0/TODO.txt');
   };
   let z=0;
   for(z=0;z<str.length;z++){if(str[z]===' ')break;}
@@ -2328,6 +2350,10 @@ const consCmd=(str)=>{
     case '>FREEZE': freeze(); break; // disable pan/zoom on pointer
     case '>UNFREEZE': unfreeze(); break; // re-enable pan/zoom on pointer
     case '>CPL': manualCpl(); break; // manual compile aka in labels mode
+    case '>MANUAL': manual(); break;
+    case '>AUTHOR': author(); break;
+    case '>LICENSE': license(); break;
+    case '>TODO': todo(); break;
   }
 };
 
